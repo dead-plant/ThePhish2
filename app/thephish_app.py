@@ -1,10 +1,12 @@
+import eventlet
+eventlet.monkey_patch()
+
 import flask
 import flask_socketio
+from ws_logger import WebSocketLogger
 import list_emails
 import case_from_email
 import run_analysis
-import eventlet
-from ws_logger import WebSocketLogger
 
 # Monkeypatches the standard library to replace its key elements with green equivalents (greenlets)
 # This is needed for websocket to work and avoid falling back to long polling
