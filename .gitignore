@@ -58,3 +58,4 @@ dist-ssr
 *.sln
 *.sw?
 /logs/
+/.idea
