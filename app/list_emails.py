@@ -1,5 +1,6 @@
 import logging.config
 import imaplib
+import ssl
 import json
 import email
 import base64
@@ -13,14 +14,38 @@ log = None
 # Global variable used for the configuration
 config = {}
 
-
 def connect_to_IMAP_server():
-	# Create the connection to the IMAP server using host and port
-	connection = imaplib.IMAP4_SSL(config['imapHost'], config['imapPort'])
-	# Log in using username and password
-	connection.login(config['imapUser'], config['imapPassword'])
-	log.info('Connected to {0}@{1}:{2}/{3}'.format(config['imapUser'], config['imapHost'], config['imapPort'], config['imapFolder']))
-	return connection
+    timeout = 15
+
+    host = config['imapHost']
+    port = config['imapPort']
+    insecure = config['imapInsecure']
+    user = config['imapUser']
+    pwd = config['imapPassword']
+    folder = config['imapFolder']
+
+    # Build SSL Context
+    if insecure == "no":
+        ctx = ssl.create_default_context()
+    elif insecure == "yes":
+        ctx = ssl._create_unverified_context()
+    else:
+        raise Exception("insecure must be 'yes' or 'no'")
+
+    # Prefer implicit TLS (IMAP over SSL)
+    try:
+        conn = imaplib.IMAP4_SSL(host, port, ssl_context=ctx, timeout=timeout)
+        conn.login(user, pwd)
+        log.info('Connected to {0}@{1}:{2}/{3} using implicit tls. insecure={4}'.format(user, host, port, folder, insecure))
+        return conn
+    except Exception as e_tls:
+        # Fallback to STARTTLS
+        conn = imaplib.IMAP4(host, port, timeout=timeout)
+        conn.starttls(ssl_context=ctx)
+        conn.login(user, pwd)
+        log.info('Connected to {0}@{1}:{2}/{3} using Starttls. insecure={4}'.format(user, host, port, folder, insecure))
+        return conn
+
 
 # Fetch all the unread emails in the specified folder that have an EML attachment and return their information
 def retrieve_emails(connection):
@@ -230,6 +255,7 @@ def main():
 			# IMAP config
 			config['imapHost'] = conf_dict['imap']['host']
 			config['imapPort'] = int(conf_dict['imap']['port'])
+			config['imapInsecure'] = conf_dict['imap']['insecure']
 			config['imapUser'] = conf_dict['imap']['user']
 			config['imapPassword'] = conf_dict['imap']['password']
 			config['imapFolder'] = conf_dict['imap']['folder']

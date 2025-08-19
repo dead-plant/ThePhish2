@@ -2,6 +2,7 @@
 	"imap" : {
 		"host" : "imap.gmail.com",
 		"port" : "993",
+        "insecure": "no",
 		"user" : "",
 		"password" : "",
 		"folder" : "inbox"
