@@ -374,7 +374,7 @@ ThePhish has been tested with the following analyzers:
 - *Urlscan_io_Search_0_1_1* 
 - VirusTotal_GetReport_3_1
 - VirusTotal_Scan_3_1
-- Yara_2_0
+- Yara_3_0
 
 The analyzers emphasized in *italic* are the ones for which the levels have been modified (but that can be overridden, even though it is not advisable), while the analyzers emphasized in **bold** are the ones that are handled directly in the code of ThePhish either because they do not respect the convention for the report structure, or because they have bugs. Moreover, the following analyzers are handled in the code of ThePhish to use them in the best possible manner:
 
@@ -384,7 +384,7 @@ The analyzers emphasized in *italic* are the ones for which the levels have been
    
 - **UnshortenLink_1_2**: It is started before any other analyzer on a URL so as to make it possible to unshorten a link and add the unshortened link as an additional observable.
   
-- **Yara_2_0**: It is the only one that is started on the EML attachment.
+- **Yara_3_0**: It is the only one that is started on the EML attachment.
 
 
 ### Enable the *MISP* analyzer
@@ -393,7 +393,7 @@ In order to integrate Cortex with MISP, you must activate the *MISP_2_1* analyze
 
 ### Enable the *Yara* analyzer
 
-If you want to use the *Yara_2_0* analyzer, you must create a folder on the machine on which Cortex is running that contains:
+If you want to use the *Yara_3_0* analyzer, you must create a folder on the machine on which Cortex is running that contains:
 
  - The Yara rules, where each rule is a file with the `.yar` extension
  - A file named `index.yar`, which contains a line for each Yara rule in that folder that respects this syntax: `include "yara_rule_name.yar"`

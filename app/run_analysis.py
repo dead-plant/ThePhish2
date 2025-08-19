@@ -146,7 +146,7 @@ def analyze_observables(case, task_id, wsl):
 		if observable_info['type'] == 'file_message/rfc822':
 			# Start the job related to the Yara analyzer if it is enabled
 			for analyzer in applicable_analyzers['file']:
-				if analyzer.name == 'Yara_2_0':
+				if analyzer.name == 'Yara_3_0':
 					# Create the job object
 					job = {}
 					# Run the analyzer and convert the response in JSON format, then obtain and save the job ID 
