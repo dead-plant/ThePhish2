@@ -439,16 +439,16 @@ def main(wsl, mail_uid):
 
 	# Logging configuration
 	try:
-		with open('logging_conf.json') as log_conf:
+		with open('conf/logging_conf.json') as log_conf:
 			log_conf_dict = json.load(log_conf)
 			logging.config.dictConfig(log_conf_dict)
 	except Exception as e: 
-		print("[ERROR]_[list_emails]: Error while trying to open the file 'logging_conf.json'. It cannot be read or it is not valid: {}".format(traceback.format_exc()))
+		print("[ERROR]_[list_emails]: Error while trying to open the file 'conf/logging_conf.json'. It cannot be read or it is not valid: {}".format(traceback.format_exc()))
 		return 
 	log = logging.getLogger(__name__)
 
 	try:
-		with open('configuration.json') as conf_file:
+		with open('conf/configuration.json') as conf_file:
 			conf_dict = json.load(conf_file)
 			
 			# IMAP configuration
@@ -468,8 +468,8 @@ def main(wsl, mail_uid):
 			config['caseTags'] = conf_dict['case']['tags']
 
 	except Exception as e: 
-		log.error("Error while trying to open the file 'configuration.json': {}".format(traceback.format_exc()))
-		wsl.emit_error("Error while trying to open the file 'configuration.json'")
+		log.error("Error while trying to open the file 'conf/configuration.json': {}".format(traceback.format_exc()))
+		wsl.emit_error("Error while trying to open the file 'conf/configuration.json'")
 		return
 
 	# Read the whitelist file, which is composed by various parts:
@@ -477,7 +477,7 @@ def main(wsl, mail_uid):
 	# - The regex matching part
 	# - Three lists of domains that are used to whitelist subdomains, URLs and email addresses that contain them
 	try:
-		with open('whitelist.json') as whitelist_file:
+		with open('conf/whitelist.json') as whitelist_file:
 			whitelist_dict = json.load(whitelist_file)
 			whitelist['mailExact'] = whitelist_dict['exactMatching']['mail']
 			whitelist['mailRegex'] = whitelist_dict['regexMatching']['mail']
@@ -498,8 +498,8 @@ def main(wsl, mail_uid):
 			whitelist['regexDomainsInEmails'] = [r'^.+@(.+\.|){0}$'.format(domain.replace(r'.', r'\.')) for domain in whitelist_dict['domainsInEmails']]
 	
 	except Exception as e: 
-		log.error("Error while trying to open the file 'whitelist.json': {}".format(traceback.format_exc()))
-		wsl.emit_error("Error while trying to open the file 'whitelist.json'")
+		log.error("Error while trying to open the file 'conf/whitelist.json': {}".format(traceback.format_exc()))
+		wsl.emit_error("Error while trying to open the file 'conf/whitelist.json'")
 		return
 
 	# Object needed to use TheHive4py

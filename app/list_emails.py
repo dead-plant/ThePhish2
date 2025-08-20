@@ -239,17 +239,17 @@ def main():
 	
 	# Logging configuration
 	try:
-		with open('logging_conf.json') as log_conf:
+		with open('conf/logging_conf.json') as log_conf:
 			log_conf_dict = json.load(log_conf)
 			logging.config.dictConfig(log_conf_dict)
 	except Exception as e: 
-		print("[ERROR]_[list_emails]: Error while trying to open the file 'logging_conf.json'. It cannot be read or it is not valid: {}".format(traceback.format_exc()))
+		print("[ERROR]_[list_emails]: Error while trying to open the file 'conf/logging_conf.json'. It cannot be read or it is not valid: {}".format(traceback.format_exc()))
 		return 
 	log = logging.getLogger(__name__)
 
 	# IMAP configuration
 	try:
-		with open('configuration.json') as conf_file:
+		with open('conf/configuration.json') as conf_file:
 			conf_dict = json.load(conf_file)
 			
 			# IMAP config
@@ -261,7 +261,7 @@ def main():
 			config['imapFolder'] = conf_dict['imap']['folder']
 
 	except Exception as e: 
-		log.error("Error while trying to open the file 'configuration.json': {}".format(traceback.format_exc()))
+		log.error("Error while trying to open the file 'conf/configuration.json': {}".format(traceback.format_exc()))
 		return
 
 	# Connect to IMAP server

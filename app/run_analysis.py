@@ -496,17 +496,17 @@ def main(wsl, case, mail_to):
 
 	# Logging configuration
 	try:
-		with open('logging_conf.json') as log_conf:
+		with open('conf/logging_conf.json') as log_conf:
 			log_conf_dict = json.load(log_conf)
 			logging.config.dictConfig(log_conf_dict)
 	except Exception as e:
-		print("[ERROR]_[run_analysis]: Error while trying to open the file 'logging_conf.json'. It cannot be read or it is not valid: {}".format(traceback.format_exc()))
+		print("[ERROR]_[run_analysis]: Error while trying to open the file 'conf/logging_conf.json'. It cannot be read or it is not valid: {}".format(traceback.format_exc()))
 		return
 	log = logging.getLogger(__name__)
 
 	# TheHive, Cortex and MISP configuration
 	try:
-		with open("configuration.json") as conf_file:
+		with open("conf/configuration.json") as conf_file:
 			conf_dict = json.load(conf_file)
 			config['thehiveURL'] = conf_dict['thehive']['url']
 			config['thehiveApiKey'] = conf_dict['thehive']['apikey']
@@ -515,17 +515,17 @@ def main(wsl, case, mail_to):
 			config['cortexID'] = conf_dict['cortex']['id']
 			config['mispID'] = conf_dict['misp']['id']
 	except Exception as e: 
-		log.error("Error while trying to open the file 'configuration.json': {}".format(traceback.format_exc()))
-		wsl.emit_error("Error while trying to open the file 'configuration.json'")
+		log.error("Error while trying to open the file 'conf/configuration.json': {}".format(traceback.format_exc()))
+		wsl.emit_error("Error while trying to open the file 'conf/configuration.json'")
 		return
 
 	# Read the configuration file for the analyzers levels modification
 	try:
-		with open("analyzers_level_conf.json") as conf_file:
+		with open("conf/analyzers_level_conf.json") as conf_file:
 			conf_analyzers_level = json.load(conf_file)
 	except Exception as e: 
-		log.error("Error while trying to open the file 'analyzers_level_conf.json': {}".format(traceback.format_exc()))
-		wsl.emit_error("Error while trying to open the file 'analyzers_level_conf.json'")
+		log.error("Error while trying to open the file 'conf/analyzers_level_conf.json': {}".format(traceback.format_exc()))
+		wsl.emit_error("Error while trying to open the file 'conf/analyzers_level_conf.json'")
 		return
 
 	# Read the whitelist file, which is composed by various parts:
@@ -534,7 +534,7 @@ def main(wsl, case, mail_to):
 	# - Three lists of domains that are used to whitelist subdomains, URLs and email addresses that contain them
 	# In this case only the parts related to URLs are considered
 	try:
-		with open('whitelist.json') as whitelist_file:
+		with open('conf/whitelist.json') as whitelist_file:
 			whitelist_dict = json.load(whitelist_file)
 			whitelist['urlExact'] = whitelist_dict['exactMatching']['url']
 			whitelist['urlRegex'] = whitelist_dict['regexMatching']['url']
@@ -543,8 +543,8 @@ def main(wsl, case, mail_to):
 			whitelist['regexDomainsInURLs'] = [r'^(http|https):\/\/([^\/]+\.|){0}(\/.*|\?.*|\#.*|)$'.format(domain.replace(r'.', r'\.')) for domain in whitelist_dict['domainsInURLs']]
 	
 	except Exception as e: 
-		log.error("Error while trying to open the file 'whitelist.json': {}".format(traceback.format_exc()))
-		wsl.emit_error("Error while trying to open the file 'whitelist.json'")
+		log.error("Error while trying to open the file 'conf/whitelist.json': {}".format(traceback.format_exc()))
+		wsl.emit_error("Error while trying to open the file 'conf/whitelist.json'")
 		return
 
 	# Objects needed to use TheHive4py Cortex4py

@@ -3,7 +3,7 @@ eventlet.monkey_patch()
 
 import flask
 import flask_socketio
-from ws_logger import WebSocketLogger
+from utils.ws_logger import WebSocketLogger
 import list_emails
 import case_from_email
 import run_analysis
@@ -13,7 +13,7 @@ import markupsafe
 # This is needed for websocket to work and avoid falling back to long polling
 eventlet.monkey_patch()
 
-app = flask.Flask(__name__)
+app = flask.Flask(__name__, template_folder='web/templates', static_folder='web/static')
 socketio = flask_socketio.SocketIO(app)
 
 # The main page
