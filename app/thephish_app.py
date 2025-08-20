@@ -49,7 +49,7 @@ def analyze_email():
 
 	# Call the modules used to create the case and run the analysis
 	new_case_id, external_from_field = case_from_email.main(config, wsl, mail_uid)
-	verdict = run_analysis.main(wsl, new_case_id, external_from_field)
+	verdict = run_analysis.main(config, wsl, new_case_id, external_from_field)
 
 	# Format response and return
 	response = flask.jsonify(verdict)

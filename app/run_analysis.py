@@ -2,44 +2,19 @@ import logging.config
 import json
 import time
 import traceback
-import re
 import thehive4py.api, thehive4py.models, thehive4py.query
+from thehive4py.api import TheHiveApi
 import cortex4py.api
+from cortex4py.api import Api
+import utils.log
+import utils.whitelist
+from utils.ws_logger import WebSocketLogger
 
 # Global variable used for logging
-log = None
-
-# Global variables needed to use the API
-api_thehive = None
-api_cortex = None
-
-# Global variable used for the configuration
-config = {}
-
-# Global variable used to configure the analyzers level
-conf_analyzers_level = {}
-
-# Global variable used for the whitelist
-whitelist = {}
-
-
-# Check if an URL is whitelisted with an exact match or with a regex match
-def is_url_whitelisted(url):
-	found = False
-	if ((not found) and (url in whitelist['urlExact'])):
-		found = True
-	if (not found):
-		for regex in whitelist['regexDomainsInURLs']:
-			if re.search(regex, url):
-				found = True
-	if (not found):
-		for regex in whitelist['urlRegex']:
-			if re.search(regex, url):
-				found = True
-	return found
+lo: logging.Logger
 
 # Send the notification to the user
-def notify_start_of_analysis(case, task_id, mail_to, wsl):
+def notify_start_of_analysis(case, task_id, mail_to, wsl: WebSocketLogger, api_thehive: TheHiveApi, api_cortex: Api):
 
 	# Add a description to the first task that is understood by the Mailer responder and start it
 	# The description must start with "mailto:<email>" and then continue with the body of the email to send to the user
@@ -54,7 +29,8 @@ def notify_start_of_analysis(case, task_id, mail_to, wsl):
 	# Obtain the representation of the Mailer responder
 	mailer_responder = api_cortex.responders.get_by_name('Mailer_1_0')
 	# Check if the responder has been enabled in Cortex
-	if (mailer_responder):
+	#if mailer_responder:
+	if False:
 		# Obtain the ID of the Mailer responder and start the Mailer responder on the first task
 		job_mailer_id = api_thehive.run_responder(mailer_responder.id, 'case_task', task_id).json()['cortexJobId']
 		# Obtain the status of the job related to the Mailer responder and wait for its completion
@@ -80,7 +56,7 @@ def notify_start_of_analysis(case, task_id, mail_to, wsl):
 
 
 # Start the analyzers on the observables
-def analyze_observables(case, task_id, wsl):
+def analyze_observables(case, task_id, wsl: WebSocketLogger, config: dict, api_thehive: TheHiveApi, api_cortex: Api, whitelist: dict, conf_analyzers_level: dict):
 
 	# Start the second task
 	task_analysis = thehive4py.models.CaseTask(
@@ -150,7 +126,7 @@ def analyze_observables(case, task_id, wsl):
 					# Create the job object
 					job = {}
 					# Run the analyzer and convert the response in JSON format, then obtain and save the job ID 
-					job['job_id'] = api_thehive.run_analyzer(config['cortexID'], observable_info['id'], analyzer.name).json()['cortexJobId']
+					job['job_id'] = api_thehive.run_analyzer(config['cortex']['id'], observable_info['id'], analyzer.name).json()['cortexJobId']
 					# Save the observable ID
 					job['observable_id'] = observable_info['id']
 					# Set the status to NotTerminated
@@ -165,7 +141,7 @@ def analyze_observables(case, task_id, wsl):
 			for analyzer in applicable_analyzers[observable_info['type']]:
 				if analyzer.name == 'UnshortenLink_1_2':
 					# Start the UnshortenLink analyzer
-					job_ul_id = api_thehive.run_analyzer(config['cortexID'], observable_info['id'], 'UnshortenLink_1_2').json()['cortexJobId']
+					job_ul_id = api_thehive.run_analyzer(config['cortex']['id'], observable_info['id'], 'UnshortenLink_1_2').json()['cortexJobId']
 					log.info("Started analyzer " + analyzer.name + " for " + observable_info['type'] + " " + observable_info['name'])
 					wsl.emit_info("Started analyzer " + analyzer.name + " for " + observable_info['type'] + " " + observable_info['name'])
 					# Obtain the status of the job related to the UnshortenLink analyzer and wait for its completion
@@ -181,7 +157,7 @@ def analyze_observables(case, task_id, wsl):
 							unshortened_url = job_ul['report']['full']['url']
 					# Add the unshortened link as an observable to the case if not whitelisted
 					if len(unshortened_url) > 0:
-						if(is_url_whitelisted(unshortened_url)):
+						if utils.whitelist.is_whitelisted(whitelist, 'url', unshortened_url):
 							log.info("Skipped whitelisted observable url: {0}".format(unshortened_url))
 							wsl.emit_info("Skipped whitelisted observable url: {0}".format(unshortened_url))
 						else:
@@ -222,7 +198,7 @@ def analyze_observables(case, task_id, wsl):
 				if observable_info['type'] == 'url' and analyzer.name == 'UnshortenLink_1_2':
 					continue
 				# Start the analyzer
-				analyzer_job = api_thehive.run_analyzer(config['cortexID'], observable_info['id'], analyzer.name)
+				analyzer_job = api_thehive.run_analyzer(config['cortex']['id'], observable_info['id'], analyzer.name)
 				# If the rate limit is exceeded for a certain analyzer, the related job is not started
 				# so the information needed to start the job later is added to a list of delayed jobs
 				if ("RateLimitExceeded" in str(analyzer_job.json())):
@@ -248,9 +224,9 @@ def analyze_observables(case, task_id, wsl):
 	while len(delayed_jobs) > 0:
 		for delayed_job in delayed_jobs:
 			# Try to start the analyzer
-			analyzer_job = api_thehive.run_analyzer(config['cortexID'], delayed_job['observable_id'], delayed_job['analyzer_name'])
+			analyzer_job = api_thehive.run_analyzer(config['cortex']['id'], delayed_job['observable_id'], delayed_job['analyzer_name'])
 			# If the rate limit is still exceeded for this analyzer, do not remove it from the list of delayed jobs
-			if ("RateLimitExceeded" in str(analyzer_job.json())):
+			if "RateLimitExceeded" in str(analyzer_job.json()):
 				log.info("Rate limit exceeded for analyzer " + delayed_job['analyzer_name'] + " for " + delayed_job['observable_type'] + " " + delayed_job['observable_name'] + ". It will be restarted in a while.")
 				wsl.emit_info("Rate limit exceeded for analyzer " + delayed_job['analyzer_name'] + " for " + delayed_job['observable_type'] + " " + delayed_job['observable_name'] + ". It will be restarted in a while.")
 			# Otherwise start the analyzer, add it to the list of started analyzers and remove it from the list of delayed analyzers
@@ -279,7 +255,7 @@ def analyze_observables(case, task_id, wsl):
 			# Request the status of the job and if it is terminated increment the number of terminated jobs
 			if job_obj['status'] == 'NotTerminated':
 				job = api_cortex.jobs.get_by_id(job_obj['job_id']).json()
-				if (job['status'] == 'Success' or job['status'] == 'Failure'):
+				if job['status'] == 'Success' or job['status'] == 'Failure':
 					job_obj['status'] = job['status']
 					terminated_jobs += 1
 
@@ -309,24 +285,24 @@ def analyze_observables(case, task_id, wsl):
 						summary = report.get('summary')
 						if summary:
 							taxonomies = summary.get('taxonomies')
-							if(taxonomies and len(taxonomies) > 0):
+							if taxonomies and len(taxonomies) > 0:
 								# Handle Pulsedive
 								# Many taxonomies are created, only the last one is needed
-								if(job['analyzerName'] == 'Pulsedive_GetIndicator_1_0'):
+								if job['analyzerName'] == 'Pulsedive_GetIndicator_1_0':
 									level = taxonomies[-1].get('level', 'info')
 								# Handle IPVoid
 								# Many taxonomies are created, only the last one is needed
-								elif (job['analyzerName'] == 'IPVoid_1_0'):
+								elif job['analyzerName'] == 'IPVoid_1_0':
 									level = taxonomies[-1].get('level', 'info')
 								# Handle Shodan
 								# Many taxonomies are created, only the last one is needed
 								# The other analyzers based on shodan only give "info" as level
-								elif (job['analyzerName'] in ['Shodan_Host_1_0', 'Shodan_Host_History_1_0']):
+								elif job['analyzerName'] in ['Shodan_Host_1_0', 'Shodan_Host_History_1_0']:
 									level = taxonomies[-1].get('level', 'info')
 								# Handle SpamhausDBL
 								# The first taxonomy contains the return code that if it is among the codes listed below it means that the level should be malicious
-								elif (job['analyzerName'] == 'SpamhausDBL_1_0'):
-									if(taxonomies[0].get('value', 'NXDOMAIN') in ['127.0.1.2', '127.0.1.4', '127.0.1.5', '127.0.1.6', '127.0.1.102', '127.0.1.103', '127.0.1.104', '127.0.1.105', '127.0.1.106']):
+								elif job['analyzerName'] == 'SpamhausDBL_1_0':
+									if taxonomies[0].get('value', 'NXDOMAIN') in ['127.0.1.2', '127.0.1.4', '127.0.1.5', '127.0.1.6', '127.0.1.102', '127.0.1.103', '127.0.1.104', '127.0.1.105', '127.0.1.106']:
 										level = 'malicious'   
 								# For all the other analyzers uses the first taxonomy
 								else:
@@ -336,7 +312,7 @@ def analyze_observables(case, task_id, wsl):
 					# md5_hash and sha256_hash are supported only for payload search and not also for URL or hosts (IP, domains)
 					# Without this modification it is always given a level of "info" even though it should be "malicious"
 					# So, if "info" is obtained, check in the full report if there is a threat and, if so, set the level to "malicious"
-					if (job['analyzerName'] == 'URLhaus_2_0' and job['report']['full']['query_status'] == 'ok' and job['report']['full'].get('threat')):
+					if job['analyzerName'] == 'URLhaus_2_0' and job['report']['full']['query_status'] == 'ok' and job['report']['full'].get('threat'):
 						level = 'malicious'
 
 					# Handle analyzers levels
@@ -369,7 +345,7 @@ def analyze_observables(case, task_id, wsl):
 	return observables_info, reports_observables
 
 
-def terminate_analysis(case, task_id, mail_to, observables_info, reports_observables, wsl):
+def terminate_analysis(case, task_id, mail_to, observables_info, reports_observables, wsl: WebSocketLogger, config: dict, api_thehive: TheHiveApi, api_cortex: Api):
 
 	# Start the third task
 	task_result = thehive4py.models.CaseTask(
@@ -419,7 +395,7 @@ def terminate_analysis(case, task_id, mail_to, observables_info, reports_observa
 
 		if verdict == 'Malicious':
 			# If the verdict is malicious, export also the case to MISP along with the observables marked as IoC
-			export_result = api_thehive.export_to_misp(config['mispID'], case.json()['id'])
+			export_result = api_thehive.export_to_misp(config['misp']['id'], case.json()['id'])
 			if export_result.ok:
 				log.info("Case exported to MISP")
 				wsl.emit_info("Case exported to MISP")
@@ -443,7 +419,8 @@ def terminate_analysis(case, task_id, mail_to, observables_info, reports_observa
 		# Obtain the representation of the Mailer responder
 		mailer_responder = api_cortex.responders.get_by_name('Mailer_1_0')
 		# Check if the responder has been enabled in Cortex
-		if (mailer_responder):
+		#if (mailer_responder):
+		if False:
 			# Obtain the ID of the Mailer responder and start the Mailer responder on the third task
 			job_mailer_id = api_thehive.run_responder(mailer_responder.id, 'case_task', task_id).json()['cortexJobId']
 			# Obtain the status of the job related to the Mailer responder and wait for its completion
@@ -486,38 +463,51 @@ def terminate_analysis(case, task_id, mail_to, observables_info, reports_observa
 # Main function called from outside 
 # The wsl is not a global variable to support multiple tabs 
 # The mail_to parameter is the email address of the user to send notifications to
-def main(wsl, case, mail_to):
-
-	global config
+def main(config: dict, wsl: WebSocketLogger, case, mail_to):
+	# Create Logger
 	global log
-	global api_thehive
-	global api_cortex
-	global conf_analyzers_level
+	log = utils.log.get_logger("run_analysis")
+	if log is None:
+		return None
 
-	# Logging configuration
+	# Load whitelist
+	whitelist = utils.whitelist.load(log, wsl)
+	if whitelist is None:
+		return None
+
+	# Create thehive api
 	try:
-		with open('conf/logging_conf.json') as log_conf:
-			log_conf_dict = json.load(log_conf)
-			logging.config.dictConfig(log_conf_dict)
+		insecure = config['thehive']['tlsinsecure']
+		if insecure == "no":
+			verifycert = True
+		elif insecure == "yes":
+			verifycert = False
+		else:
+			raise Exception("insecure must be 'yes' or 'no'")
+
+		# Object needed to use TheHive4py
+		api_thehive = thehive4py.api.TheHiveApi(config['thehive']['url'], config['thehive']['apikey'], cert=verifycert)
 	except Exception as e:
-		print("[ERROR]_[run_analysis]: Error while trying to open the file 'conf/logging_conf.json'. It cannot be read or it is not valid: {}".format(traceback.format_exc()))
-		return
-	log = logging.getLogger(__name__)
+		log.error("Error while trying to create thehive api: {}".format(traceback.format_exc()))
+		wsl.emit_error("Error while trying to create thehive api")
+		return None
 
-	# TheHive, Cortex and MISP configuration
+	# Create cortex api
 	try:
-		with open("conf/configuration.json") as conf_file:
-			conf_dict = json.load(conf_file)
-			config['thehiveURL'] = conf_dict['thehive']['url']
-			config['thehiveApiKey'] = conf_dict['thehive']['apikey']
-			config['cortexURL'] = conf_dict['cortex']['url']
-			config['cortexApiKey'] = conf_dict['cortex']['apikey']
-			config['cortexID'] = conf_dict['cortex']['id']
-			config['mispID'] = conf_dict['misp']['id']
-	except Exception as e: 
-		log.error("Error while trying to open the file 'conf/configuration.json': {}".format(traceback.format_exc()))
-		wsl.emit_error("Error while trying to open the file 'conf/configuration.json'")
-		return
+		insecure = config['cortex']['tlsinsecure']
+		if insecure == "no":
+			verifycert = True
+		elif insecure == "yes":
+			verifycert = False
+		else:
+			raise Exception("insecure must be 'yes' or 'no'")
+
+		# Object needed to use TheHive4py
+		api_cortex = cortex4py.api.Api(config['cortex']['url'], config['cortex']['apikey'], verify_cert=verifycert)
+	except Exception as e:
+		log.error("Error while trying to create cortex api: {}".format(traceback.format_exc()))
+		wsl.emit_error("Error while trying to create cortex api")
+		return None
 
 	# Read the configuration file for the analyzers levels modification
 	try:
@@ -526,31 +516,7 @@ def main(wsl, case, mail_to):
 	except Exception as e: 
 		log.error("Error while trying to open the file 'conf/analyzers_level_conf.json': {}".format(traceback.format_exc()))
 		wsl.emit_error("Error while trying to open the file 'conf/analyzers_level_conf.json'")
-		return
-
-	# Read the whitelist file, which is composed by various parts:
-	# - The exact matching part
-	# - The regex matching part
-	# - Three lists of domains that are used to whitelist subdomains, URLs and email addresses that contain them
-	# In this case only the parts related to URLs are considered
-	try:
-		with open('conf/whitelist.json') as whitelist_file:
-			whitelist_dict = json.load(whitelist_file)
-			whitelist['urlExact'] = whitelist_dict['exactMatching']['url']
-			whitelist['urlRegex'] = whitelist_dict['regexMatching']['url']
-
-			# The domains in the regexDomainsInURLs list are used to create a list of regular expressions that serve to whitelist URLs based on those domains
-			whitelist['regexDomainsInURLs'] = [r'^(http|https):\/\/([^\/]+\.|){0}(\/.*|\?.*|\#.*|)$'.format(domain.replace(r'.', r'\.')) for domain in whitelist_dict['domainsInURLs']]
-	
-	except Exception as e: 
-		log.error("Error while trying to open the file 'conf/whitelist.json': {}".format(traceback.format_exc()))
-		wsl.emit_error("Error while trying to open the file 'conf/whitelist.json'")
-		return
-
-	# Objects needed to use TheHive4py Cortex4py
-	api_thehive = thehive4py.api.TheHiveApi(config['thehiveURL'], config['thehiveApiKey'])
-	api_cortex = cortex4py.api.Api(config['cortexURL'], config['cortexApiKey'])
-
+		return None
 
 	# Obtain the IDS of the three task of the case
 	tasks = api_thehive.get_case_tasks(case.json()['id']).json()
@@ -565,26 +531,27 @@ def main(wsl, case, mail_to):
 
 	# Call the notify_start_of_analysis function
 	try:
-		notify_start_of_analysis(case, task_ids['Notification'], mail_to, wsl)
+		notify_start_of_analysis(case, task_ids['Notification'], mail_to, wsl, api_thehive, api_cortex)
 	except Exception as e:
 		log.error("Error while trying to notify the start of analysis: {}".format(traceback.format_exc()))
 		wsl.emit_error("Error while trying to notify the start of analysis")
-		return
+		return None
 	
 	# Call the analyze_observables function
 	try:
-		observables_info, reports_observables = analyze_observables(case, task_ids['Analysis'], wsl)
+		observables_info, reports_observables = analyze_observables(case, task_ids['Analysis'], wsl, config, api_thehive, api_cortex, whitelist, conf_analyzers_level)
 	except Exception as e:
 		log.error("Error during the analysis task: {}".format(traceback.format_exc()))
 		wsl.emit_error("Error during the analysis task")
-		return
+		return None
 
 	# Call the terminate_analysis function
 	try:
-		verdict = terminate_analysis(case, task_ids['Result'], mail_to, observables_info, reports_observables, wsl)
+		verdict = terminate_analysis(case, task_ids['Result'], mail_to, observables_info, reports_observables, wsl, config, api_thehive, api_cortex)
 	except Exception as e:
 		log.error("Error during the termination of the analysis: {}".format(traceback.format_exc()))
 		wsl.emit_error("Error during the termination of the analysis")
-		return
+		return None
 
 	return verdict
+

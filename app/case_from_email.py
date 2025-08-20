@@ -212,7 +212,7 @@ def parse_eml(internal_msg, whitelist: dict, wsl: WebSocketLogger):
 					body = part.get_payload(decode=True).decode()
 				except UnicodeDecodeError:
 					body = part.get_payload(decode=True).decode('ISO-8859-1')
-				observables_body.extend(search_observables(body, wsl))
+				observables_body.extend(search_observables(body, whitelist, wsl))
 			elif mimetype == "text/html":
 				try:
 					html = part.get_payload(decode=True).decode()
@@ -271,9 +271,8 @@ def create_case(subject_field, observables_header, observables_body, attachments
 		task_notification = thehive4py.models.CaseTask(title = 'ThePhish notification')
 		task_analysis = thehive4py.models.CaseTask(title = 'ThePhish analysis')
 		task_result = thehive4py.models.CaseTask(title = 'ThePhish result')
-		case_template = thehive4py.models.CaseTemplate(name		= 'ThePhish',
-													   titlePrefix = '[ThePhish] ',
-													   tasks	   = [task_notification, task_analysis, task_result])
+		case_template = thehive4py.models.CaseTemplate(name = 'ThePhish', titlePrefix = '[ThePhish] ', tasks = [task_notification, task_analysis, task_result])
+
 		response = api_thehive.create_case_template(case_template)
 		if response.status_code == 201:
 			log.info('Template ThePhish created successfully')
@@ -288,7 +287,7 @@ def create_case(subject_field, observables_header, observables_body, attachments
 	# The emojis are removed to prevent problems when exporting the case to MISP
 	case = thehive4py.models.Case(title		= emoji.replace_emoji(subject_field),
 				tlp		  = int(config['case']['tlp']),
-				pap		  = int(config['casePAP']['pap']),
+				pap		  = int(config['case']['pap']),
 				flag		 = False,
 				tags		 = config['case']['tags'],
 				description  = 'Case created automatically by ThePhish',
@@ -393,7 +392,6 @@ def create_case(subject_field, observables_header, observables_body, attachments
 # Main function called from outside 
 # The wsl is not a global variable to support multiple tabs 
 def main(config: dict, wsl: WebSocketLogger, mail_uid) -> Optional[tuple[Any | None, Any]]:
-
 	# Create Logger
 	global log
 	log = utils.log.get_logger("case_from_email")
