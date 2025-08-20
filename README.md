@@ -1,4 +1,6 @@
-# ThePhish
+# ThePhish2
+
+ThePhish2 is a fork of [ThePhish](https://github.com/emalderson/ThePhish/tree/master) made by github.com/emalderson. Take a look at [his documentation](https://github.com/emalderson/ThePhish/blob/master/README.md) for further information about the project as well as explanations and usage guides. He also has [diagrams](https://github.com/dead-plant/ThePhish2/blob/master/diagrams.md) to explain how the application logic works in detail.
 
 <div>
   <p align="center">
@@ -14,6 +16,7 @@ ThePhish is an automated phishing email analysis tool based on [TheHive](https:/
 [![Maintenance](https://img.shields.io/badge/Maintained-yes-green.svg)](https://github.com/dead-plant/ThePhish2)
 [![GitHub](https://img.shields.io/github/license/dead-plant/ThePhish2)](https://github.com/dead-plant/ThePhish2/blob/master/LICENSE)
 [![Documentation](https://img.shields.io/badge/Documentation-in%20progress-blue.svg?style=flat)](https://github.com/dead-plant/ThePhish2)
+
 
 ## Table of contents
 
