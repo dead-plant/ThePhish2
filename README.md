@@ -46,12 +46,15 @@ github.com/emalderson also has installation/configuration guides in his [README.
 Quick note: This is only a short overview of how this works. If you want a more detailed usage guide visit the [usage example](https://github.com/emalderson/ThePhish/blob/master/README.md#thephish-example-usage) of the original ThePhish repo.
 
 1: First a user forwards an as a .eml attachment to a inbox created for ThePhish.
+
 <img src="pictures/demo/0_do_forward.png" width="400">
 
 2: After the user has forwarded the email the analyst can open ThePhish in his browser. There he can click "List emails" to fetch all emails from the Mailserver using IMAP.
+
 <img src="pictures/demo/2_gui_list.png" width="700">
 
 3:Then the analyst selects an email and clicks on "Analyze" to start the Analysis of an email.
+
 <img src="pictures/demo/3_start_analysis_gui.png" width="700">
 
 ## What changed
