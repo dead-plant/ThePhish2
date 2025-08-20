@@ -264,7 +264,7 @@ def parse_eml(internal_msg, whitelist: dict, wsl: WebSocketLogger):
 
 
 # Create the case on TheHive and add the observables to it
-def create_case(subject_field, observables_header, observables_body, attachments, hashes_attachments, eml_file_tuple, config: dict, api_thehive, wsl: WebSocketLogger):
+def create_case(subject_field, observables_header, observables_body, attachments, hashes_attachments, eml_file_tuple, config: dict, api_thehive: TheHiveApi, wsl: WebSocketLogger):
 
 	# Create the case template first if it does not exist
 	if(len(api_thehive.find_case_templates(query = thehive4py.query.Eq("name", 'ThePhish')).json())) == 0:
@@ -396,7 +396,7 @@ def main(config: dict, wsl: WebSocketLogger, mail_uid) -> Optional[tuple[Any | N
 
 	# Create Logger
 	global log
-	log = utils.log.get_logger("list_emails")
+	log = utils.log.get_logger("case_from_email")
 	if log is None:
 		return None
 
@@ -429,12 +429,27 @@ def main(config: dict, wsl: WebSocketLogger, mail_uid) -> Optional[tuple[Any | N
 		wsl.emit_error("Error while trying to parse the internal eml file")
 		return None
 
-	# Object needed to use TheHive4py
-	api_thehive = thehive4py.api.TheHiveApi(config['thehiveURL'], config['thehiveApiKey'])
+	# Create thehive api
+	try:
+		insecure = config['thehive']['tlsinsecure']
+		if insecure == "no":
+			verifycert = True
+		elif insecure == "yes":
+			verifycert = False
+		else:
+			raise Exception("insecure must be 'yes' or 'no'")
+
+		# Object needed to use TheHive4py
+		api_thehive = thehive4py.api.TheHiveApi(config['thehive']['url'], config['thehive']['apikey'], cert=verifycert)
+
+	except Exception as e:
+		log.error("Error while trying to create thehive api: {}".format(traceback.format_exc()))
+		wsl.emit_error("Error while trying to create thehive api")
+		return None
 
 	# Call the create_case function
 	try:
-		new_case = create_case(subject_field, observables_header, observables_body, attachments, hashes_attachments, eml_file_tuple, config, thehive4py, wsl)
+		new_case = create_case(subject_field, observables_header, observables_body, attachments, hashes_attachments, eml_file_tuple, config, api_thehive, wsl)
 	except Exception as e:
 		log.error("Error while trying to create the case: {}".format(traceback.format_exc()))
 		wsl.emit_error("Error while trying to create the case")

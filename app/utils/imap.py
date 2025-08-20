@@ -11,7 +11,7 @@ def connect(config: dict, log: logging.Logger, wsl: Optional[WebSocketLogger] = 
 
 	host = config['imap']['host']
 	port = config['imap']['port']
-	insecure = config['imap']['insecure']
+	insecure = config['imap']['tlsinsecure']
 	user = config['imap']['user']
 	pwd = config['imap']['password']
 	folder = config['imap']['folder']

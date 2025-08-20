@@ -2,14 +2,15 @@
 	"imap" : {
 		"host" : "imap.gmail.com",
 		"port" : "993",
-        "insecure": "no",
+        "tlsinsecure": "no",
 		"user" : "",
 		"password" : "",
 		"folder" : "inbox"
 	},
 	"thehive" : {
 		"url" : "http://thehive:9000",
-		"apikey" : ""
+		"apikey" : "",
+        "tlsinsecure": "no"
 	},
 	"cortex" : {
 		"url" : "http://cortex:9001",
