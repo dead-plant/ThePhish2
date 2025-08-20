@@ -1,66 +1,28 @@
-import logging.config
-import imaplib
 import io
-import json
 import base64
 import hashlib
-import re
 import email
+import email.header, email.utils, email.parser, email.generator
+import logging
+from typing import Optional, Any
 import emoji
 import urllib.parse
 import traceback
 import ioc_finder
 import thehive4py.api, thehive4py.models, thehive4py.query
+from thehive4py.api import TheHiveApi
+
+import utils.log
+import utils.whitelist
+import utils.imap
+from utils.ws_logger import WebSocketLogger
 
 # Global variable used for logging
-log = None
-
-# Global variable needed to use the API
-api_thehive = None
-
-# Global variable used for the configuration
-config = {}
-
-# Global variable used for the whitelist
-whitelist = {}
-
-
-def connect_to_IMAP_server(wsl):
-	# Create the connection to the IMAP server using host and port
-	connection = imaplib.IMAP4_SSL(config['imapHost'], config['imapPort'])
-	# Log in using username and password
-	connection.login(config['imapUser'],config['imapPassword'])
-	log.info('Connected to email {0} server {1}:{2}/{3}'.format(config['imapUser'], config['imapHost'], config['imapPort'], config['imapFolder']))
-	wsl.emit_info('Connected to email {0} server {1}:{2}/{3}'.format(config['imapUser'], config['imapHost'], config['imapPort'], config['imapFolder']))
-	return connection
-
-
-# Check if an observable is whitelisted with an exact match or with a regex match
-def is_whitelisted(obs_type, obs_value):
-	found = False
-	if ((not found) and (obs_value in whitelist[obs_type+'Exact'])):
-		found = True
-	if ((not found) and (obs_type == 'domain')):
-		for regex in whitelist['regexDomainsInSubdomains']:
-			if re.search(regex, obs_value):
-				found = True
-	if ((not found) and (obs_type == 'url')):
-		for regex in whitelist['regexDomainsInURLs']:
-			if re.search(regex, obs_value):
-				found = True
-	if ((not found) and (obs_type == 'mail')):
-		for regex in whitelist['regexDomainsInEmails']:
-			if re.search(regex, obs_value):
-				found = True
-	if ((not found) and (obs_type not in ['hash', 'filetype'])):
-		for regex in whitelist[obs_type+'Regex']:
-			if re.search(regex, obs_value):
-				found = True
-	return found
+log: logging.Logger
 
 
 # Use the ioc-finder module to extract observables from a string buffer and add to the list only if they are not whitelisted
-def search_observables(buffer, wsl):
+def search_observables(buffer, whitelist:dict,  wsl: WebSocketLogger):
 	observables = []
 	iocs = {}
 	iocs['email_addresses'] = ioc_finder.parse_email_addresses(buffer)
@@ -69,7 +31,7 @@ def search_observables(buffer, wsl):
 	# Option to parse URLs without a scheme (e.g. without https://)
 	iocs['urls'] = ioc_finder.parse_urls(buffer, parse_urls_without_scheme=False)
 	for mail in iocs['email_addresses']:
-		if is_whitelisted('mail', mail):
+		if utils.whitelist.is_whitelisted(whitelist, 'mail', mail):
 			log.info("Skipped whitelisted observable mail: {0}".format(mail))
 			wsl.emit_info("Skipped whitelisted observable mail: {0}".format(mail))
 		else:
@@ -77,7 +39,7 @@ def search_observables(buffer, wsl):
 			wsl.emit_info("Found observable mail: {0}".format(mail))
 			observables.append({'type': 'mail', 'value': mail})
 	for ip in iocs['ipv4s']:
-		if is_whitelisted('ip', ip):
+		if utils.whitelist.is_whitelisted(whitelist, 'ip', ip):
 			log.info("Skipped whitelisted observable ip: {0}".format(ip))
 			wsl.emit_info("Skipped whitelisted observable ip: {0}".format(ip))
 		else:
@@ -85,7 +47,7 @@ def search_observables(buffer, wsl):
 			wsl.emit_info("Found observable ip: {0}".format(ip))			
 			observables.append({'type': 'ip', 'value': ip})
 	for domain in iocs['domains']:
-		if is_whitelisted('domain', domain):
+		if utils.whitelist.is_whitelisted(whitelist, 'domain', domain):
 			log.info("Skipped whitelisted observable domain: {0}".format(domain))
 			wsl.emit_info("Skipped whitelisted observable domain: {0}".format(domain))
 		else:
@@ -93,7 +55,7 @@ def search_observables(buffer, wsl):
 			wsl.emit_info("Found observable domain: {0}".format(domain))
 			observables.append({'type': 'domain', 'value': domain})
 	for url in iocs['urls']:
-		if is_whitelisted('url', url):
+		if utils.whitelist.is_whitelisted(whitelist, 'url', url):
 			log.info("Skipped whitelisted observable url: {0}".format(url))
 			wsl.emit_info("Skipped whitelisted observable url: {0}".format(url))
 		else:
@@ -104,10 +66,10 @@ def search_observables(buffer, wsl):
 
 
 # Use the mail UID of the selected email to fetch only that email from the mailbox
-def obtain_eml(connection, mail_uid, wsl):
+def obtain_eml(connection, mail_uid, config: dict, wsl: WebSocketLogger):
 
 	# Read all the unseen emails from this folder
-	connection.select(config['imapFolder'])
+	connection.select(config['imap']['folder'])
 	typ, dat = connection.search(None, '(UNSEEN)')
 
 	# The dat[0] variable contains the IDs of all the unread emails
@@ -149,10 +111,10 @@ def obtain_eml(connection, mail_uid, wsl):
 			if mimetype in ['application/octet-stream', 'message/rfc822']:
 				# Obtain the internal EML file in both cases
 				if mimetype == 'application/octet-stream':
-					eml_payload = part.get_payload(decode=1)
+					eml_payload = part.get_payload(decode=True)
 					internal_msg = email.message_from_bytes(eml_payload)
 				elif mimetype == 'message/rfc822':
-					eml_payload = part.get_payload(decode=0)[0]
+					eml_payload = part.get_payload(decode=False)[0]
 					try:
 						internal_msg = email.message_from_string(base64.b64decode(str(eml_payload)).decode())
 					except:
@@ -167,12 +129,12 @@ def obtain_eml(connection, mail_uid, wsl):
 		# Handle multiple analysts that select the same email from more than one tab
 		log.error("The email with UID {} has already been analyzed. Please refresh the page and retry.".format(mail_uid))
 		wsl.emit_error("The email with UID {} has already been analyzed. Please refresh the page and retry.".format(mail_uid))
-		return
+		return None
 
 
 
 # Parse the EML file and extract the observables
-def parse_eml(internal_msg, wsl):
+def parse_eml(internal_msg, whitelist: dict, wsl: WebSocketLogger):
 
 	# Obtain the subject of the internal email
 	# This is not straightforward since the subject might be splitted in two or more parts
@@ -185,7 +147,7 @@ def parse_eml(internal_msg, wsl):
 			else:
 				decoded_elements_subj.append(decode_elem[0].decode(decode_elem[1]))
 		else:
-			if(isinstance(decode_elem[0], str)):
+			if isinstance(decode_elem[0], str):
 				decoded_elements_subj.append(str(decode_elem[0]))
 			else:
 				decoded_elements_subj.append(decode_elem[0].decode())
@@ -236,7 +198,7 @@ def parse_eml(internal_msg, wsl):
 		if header_fields.keys()[i] in header_fields_list:
 			if not observables_header.get(header_fields.keys()[i]):
 				observables_header[header_fields.keys()[i]] = []
-			observables_header[header_fields.keys()[i]].extend(search_observables(header_fields.values()[i], wsl))
+			observables_header[header_fields.keys()[i]].extend(search_observables(header_fields.values()[i], whitelist, wsl))
 		i+=1
 	
 	# Walk the multipart structure of the internal email 
@@ -258,13 +220,13 @@ def parse_eml(internal_msg, wsl):
 					html = part.get_payload(decode=True).decode('ISO-8859-1')
 				# Handle URL encoding
 				html_urldecoded = urllib.parse.unquote(html.replace("&amp;", "&"))
-				observables_body.extend(search_observables(html_urldecoded, wsl))
+				observables_body.extend(search_observables(html_urldecoded, whitelist, wsl))
 		# Extract attachments
 		else:
 			filename = part.get_filename()
 			if filename and mimetype:
 				# Add the attachment if it is not whitelisted (in terms of filename or filetype)
-				if is_whitelisted('filename', filename) or is_whitelisted('filetype', mimetype):
+				if utils.whitelist.is_whitelisted(whitelist, 'filename', filename) or utils.whitelist.is_whitelisted(whitelist, 'filetype', mimetype):
 					log.info("Skipped whitelisted observable file: {0}".format(filename))
 					wsl.emit_info("Skipped whitelisted observable file: {0}".format(filename))
 				else:
@@ -278,7 +240,7 @@ def parse_eml(internal_msg, wsl):
 					hash_attachment = {}
 					hash_attachment['hashValue'] = sha256.hexdigest()
 					hash_attachment['hashedAttachment'] = filename
-					if is_whitelisted('hash', hash_attachment['hashValue']):
+					if utils.whitelist.is_whitelisted(whitelist, 'hash', hash_attachment['hashValue']):
 						log.info("Skipped whitelisted observable hash: {0}".format(hash_attachment['hashValue']))
 						wsl.emit_info("Skipped whitelisted observable hash: {0}".format(hash_attachment['hashValue']))
 					else:
@@ -302,7 +264,7 @@ def parse_eml(internal_msg, wsl):
 
 
 # Create the case on TheHive and add the observables to it
-def create_case(subject_field, observables_header, observables_body, attachments, hashes_attachments, eml_file_tuple, wsl):
+def create_case(subject_field, observables_header, observables_body, attachments, hashes_attachments, eml_file_tuple, config: dict, api_thehive, wsl: WebSocketLogger):
 
 	# Create the case template first if it does not exist
 	if(len(api_thehive.find_case_templates(query = thehive4py.query.Eq("name", 'ThePhish')).json())) == 0:
@@ -319,16 +281,16 @@ def create_case(subject_field, observables_header, observables_body, attachments
 		else:
 			log.error('Cannot create template: {0} ({1})'.format(response.status_code, response.text))
 			wsl.emit_error('Cannot create template: {0} ({1})'.format(response.status_code, response.text))
-			return 
+			return
 
 	
 	# Create the case on TheHive
 	# The emojis are removed to prevent problems when exporting the case to MISP
 	case = thehive4py.models.Case(title		= emoji.replace_emoji(subject_field),
-				tlp		  = int(config['caseTLP']), 
-				pap		  = int(config['casePAP']),
+				tlp		  = int(config['case']['tlp']),
+				pap		  = int(config['casePAP']['pap']),
 				flag		 = False,
-				tags		 = config['caseTags'],
+				tags		 = config['case']['tags'],
 				description  = 'Case created automatically by ThePhish',
 				template	 = 'ThePhish')
 	response = api_thehive.create_case(case)
@@ -430,111 +392,52 @@ def create_case(subject_field, observables_header, observables_body, attachments
 
 # Main function called from outside 
 # The wsl is not a global variable to support multiple tabs 
-def main(wsl, mail_uid):
+def main(config: dict, wsl: WebSocketLogger, mail_uid) -> Optional[tuple[Any | None, Any]]:
 
-	global config
-	global whitelist
+	# Create Logger
 	global log
-	global api_thehive
+	log = utils.log.get_logger("list_emails")
+	if log is None:
+		return None
 
-	# Logging configuration
+	# Connect to IMAP server
 	try:
-		with open('conf/logging_conf.json') as log_conf:
-			log_conf_dict = json.load(log_conf)
-			logging.config.dictConfig(log_conf_dict)
-	except Exception as e: 
-		print("[ERROR]_[list_emails]: Error while trying to open the file 'conf/logging_conf.json'. It cannot be read or it is not valid: {}".format(traceback.format_exc()))
-		return 
-	log = logging.getLogger(__name__)
+		connection = utils.imap.connect(config, log, wsl)
+	except Exception as e:
+		log.error("Error while trying to connect to IMAP server: {}".format(traceback.format_exc()))
+		wsl.emit_error("Error while trying to connect to IMAP server")
+		return None
 
+	# Call the obtain_eml function
 	try:
-		with open('conf/configuration.json') as conf_file:
-			conf_dict = json.load(conf_file)
-			
-			# IMAP configuration
-			config['imapHost'] = conf_dict['imap']['host']
-			config['imapPort'] = int(conf_dict['imap']['port'])
-			config['imapUser'] = conf_dict['imap']['user']
-			config['imapPassword'] = conf_dict['imap']['password']
-			config['imapFolder'] = conf_dict['imap']['folder']
+		internal_msg, external_from_field = obtain_eml(connection, mail_uid, config, wsl)
+	except Exception as e:
+		log.error("Error while trying to obtain the internal eml file: {}".format(traceback.format_exc()))
+		wsl.emit_error("Error while trying to obtain the internal eml file")
+		return None
 
-			# TheHive configuration
-			config['thehiveURL'] = conf_dict['thehive']['url']
-			config['thehiveApiKey'] = conf_dict['thehive']['apikey']
+	# Load whitelist
+	whitelist = utils.whitelist.load(log, wsl)
+	if whitelist is None:
+		return None
 
-			# New case configuration
-			config['caseTLP'] = conf_dict['case']['tlp']
-			config['casePAP'] = conf_dict['case']['pap']
-			config['caseTags'] = conf_dict['case']['tags']
-
-	except Exception as e: 
-		log.error("Error while trying to open the file 'conf/configuration.json': {}".format(traceback.format_exc()))
-		wsl.emit_error("Error while trying to open the file 'conf/configuration.json'")
-		return
-
-	# Read the whitelist file, which is composed by various parts:
-	# - The exact matching part
-	# - The regex matching part
-	# - Three lists of domains that are used to whitelist subdomains, URLs and email addresses that contain them
+	# Call the parse_eml function
 	try:
-		with open('conf/whitelist.json') as whitelist_file:
-			whitelist_dict = json.load(whitelist_file)
-			whitelist['mailExact'] = whitelist_dict['exactMatching']['mail']
-			whitelist['mailRegex'] = whitelist_dict['regexMatching']['mail']
-			whitelist['ipExact'] = whitelist_dict['exactMatching']['ip']
-			whitelist['ipRegex'] = whitelist_dict['regexMatching']['ip']
-			whitelist['domainExact'] = whitelist_dict['exactMatching']['domain']
-			whitelist['domainRegex'] = whitelist_dict['regexMatching']['domain']
-			whitelist['urlExact'] = whitelist_dict['exactMatching']['url']
-			whitelist['urlRegex'] = whitelist_dict['regexMatching']['url']
-			whitelist['filenameExact'] = whitelist_dict['exactMatching']['filename']
-			whitelist['filenameRegex'] = whitelist_dict['regexMatching']['filename']
-			whitelist['filetypeExact'] = whitelist_dict['exactMatching']['filetype']
-			whitelist['hashExact'] = whitelist_dict['exactMatching']['hash']
-
-			# The domains in the last three lists are used to create three lists of regular expressions that serve to whitelist subdomains, URLs and email addresses based on those domains
-			whitelist['regexDomainsInSubdomains'] = [r'^(.+\.|){0}$'.format(domain.replace(r'.', r'\.')) for domain in whitelist_dict['domainsInSubdomains']]
-			whitelist['regexDomainsInURLs'] = [r'^(http|https):\/\/([^\/]+\.|){0}(\/.*|\?.*|\#.*|)$'.format(domain.replace(r'.', r'\.')) for domain in whitelist_dict['domainsInURLs']]
-			whitelist['regexDomainsInEmails'] = [r'^.+@(.+\.|){0}$'.format(domain.replace(r'.', r'\.')) for domain in whitelist_dict['domainsInEmails']]
-	
-	except Exception as e: 
-		log.error("Error while trying to open the file 'conf/whitelist.json': {}".format(traceback.format_exc()))
-		wsl.emit_error("Error while trying to open the file 'conf/whitelist.json'")
-		return
+		subject_field, observables_header, observables_body, attachments, hashes_attachments, eml_file_tuple = parse_eml(internal_msg, whitelist, wsl)
+	except Exception as e:
+		log.error("Error while trying to parse the internal eml file: {}".format(traceback.format_exc()))
+		wsl.emit_error("Error while trying to parse the internal eml file")
+		return None
 
 	# Object needed to use TheHive4py
 	api_thehive = thehive4py.api.TheHiveApi(config['thehiveURL'], config['thehiveApiKey'])
 
-	# Connect to IMAP server
-	try:
-		connection = connect_to_IMAP_server(wsl)
-	except Exception as e:
-		log.error("Error while trying to connect to IMAP server: {}".format(traceback.format_exc()))
-		wsl.emit_error("Error while trying to connect to IMAP server")
-		return
-
-	# Call the obtain_eml function
-	try:
-		internal_msg, external_from_field = obtain_eml(connection, mail_uid, wsl)
-	except Exception as e:
-		log.error("Error while trying to obtain the internal eml file: {}".format(traceback.format_exc()))
-		wsl.emit_error("Error while trying to obtain the internal eml file")
-		return
-
-	# Call the parse_eml function
-	try:
-		subject_field, observables_header, observables_body, attachments, hashes_attachments, eml_file_tuple = parse_eml(internal_msg, wsl)
-	except Exception as e:
-		log.error("Error while trying to parse the internal eml file: {}".format(traceback.format_exc()))
-		wsl.emit_error("Error while trying to parse the internal eml file")
-		return
-
 	# Call the create_case function
 	try:
-		new_case = create_case(subject_field, observables_header, observables_body, attachments, hashes_attachments, eml_file_tuple, wsl)
+		new_case = create_case(subject_field, observables_header, observables_body, attachments, hashes_attachments, eml_file_tuple, config, thehive4py, wsl)
 	except Exception as e:
 		log.error("Error while trying to create the case: {}".format(traceback.format_exc()))
 		wsl.emit_error("Error while trying to create the case")
-		return
+		return None
 
 	return new_case, external_from_field

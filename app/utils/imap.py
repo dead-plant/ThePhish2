@@ -1,8 +1,12 @@
 import ssl
 import logging
 import imaplib
+from typing import Optional
 
-def connect(config: dict, log: logging.Logger) -> imaplib.IMAP4_SSL | imaplib.IMAP4:
+from utils.ws_logger import WebSocketLogger
+
+
+def connect(config: dict, log: logging.Logger, wsl: Optional[WebSocketLogger] = None) -> imaplib.IMAP4_SSL | imaplib.IMAP4:
 	timeout = 15
 
 	host = config['imap']['host']
@@ -25,6 +29,7 @@ def connect(config: dict, log: logging.Logger) -> imaplib.IMAP4_SSL | imaplib.IM
 		conn = imaplib.IMAP4_SSL(host, port, ssl_context=ctx, timeout=timeout)
 		conn.login(user, pwd)
 		log.info('Connected to {0}@{1}:{2}/{3} using implicit tls. insecure={4}'.format(user, host, port, folder, insecure))
+		wsl.emit_info('Connected to email {0} server {1}:{2}/{3} using implicit tls. insecure={4}'.format(user, host, port, folder, insecure))
 		return conn
 	except Exception as e_tls:
 		# Fallback to STARTTLS
@@ -32,4 +37,5 @@ def connect(config: dict, log: logging.Logger) -> imaplib.IMAP4_SSL | imaplib.IM
 		conn.starttls(ssl_context=ctx)
 		conn.login(user, pwd)
 		log.info('Connected to {0}@{1}:{2}/{3} using Starttls. insecure={4}'.format(user, host, port, folder, insecure))
+		wsl.emit_info('Connected to email {0} server {1}:{2}/{3} using Starttls. insecure={4}'.format(user, host, port, folder, insecure))
 		return conn

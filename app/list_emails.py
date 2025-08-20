@@ -200,6 +200,8 @@ def main(config: dict) -> Optional[list[Any]]:
 	# create log
 	global log
 	log = utils.log.get_logger("list_emails")
+	if log is None:
+		return None
 
 	# Connect to IMAP server
 	try:
