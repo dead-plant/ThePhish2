@@ -15,7 +15,8 @@
 	"cortex" : {
 		"url" : "http://cortex:9001",
 		"apikey" : "",
-		"id" : "local"
+		"id" : "local",
+        "tlsinsecure": "no"
 	},
 	"misp" : {
 		"id" : "MISP THP"
