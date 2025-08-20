@@ -18,6 +18,11 @@
 			"handlers": ["handler_console"],
 			"level": "INFO"
 		},
+      	"thephish_app": {
+			"handlers": ["handler_console"],
+			"level": "DEBUG",
+			"propagate": false
+		},
 		"list_emails": { 
 			"handlers": ["handler_console"],
 			"level": "DEBUG",

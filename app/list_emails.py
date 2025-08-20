@@ -1,56 +1,20 @@
-import logging.config
-import imaplib
-import ssl
-import json
 import email
 import base64
+import imaplib
 import traceback
+from typing import Optional, Any
 import bs4
 import magic
+import utils.log
+import utils.imap
 
 # Global variable used for logging
 log = None
 
-# Global variable used for the configuration
-config = {}
-
-def connect_to_IMAP_server():
-    timeout = 15
-
-    host = config['imapHost']
-    port = config['imapPort']
-    insecure = config['imapInsecure']
-    user = config['imapUser']
-    pwd = config['imapPassword']
-    folder = config['imapFolder']
-
-    # Build SSL Context
-    if insecure == "no":
-        ctx = ssl.create_default_context()
-    elif insecure == "yes":
-        ctx = ssl._create_unverified_context()
-    else:
-        raise Exception("insecure must be 'yes' or 'no'")
-
-    # Prefer implicit TLS (IMAP over SSL)
-    try:
-        conn = imaplib.IMAP4_SSL(host, port, ssl_context=ctx, timeout=timeout)
-        conn.login(user, pwd)
-        log.info('Connected to {0}@{1}:{2}/{3} using implicit tls. insecure={4}'.format(user, host, port, folder, insecure))
-        return conn
-    except Exception as e_tls:
-        # Fallback to STARTTLS
-        conn = imaplib.IMAP4(host, port, timeout=timeout)
-        conn.starttls(ssl_context=ctx)
-        conn.login(user, pwd)
-        log.info('Connected to {0}@{1}:{2}/{3} using Starttls. insecure={4}'.format(user, host, port, folder, insecure))
-        return conn
-
-
 # Fetch all the unread emails in the specified folder that have an EML attachment and return their information
-def retrieve_emails(connection):
+def retrieve_emails(connection: imaplib.IMAP4 | imaplib.IMAP4_SSL, config: dict) -> list[Any]:
 	# Read all the unseen email from this folder
-	connection.select(config['imapFolder'])
+	connection.select(config['imap']['folder'])
 	typ, dat = connection.search(None, '(UNSEEN)')
 	# The dat[0] variable contains the IDs of all the unread emails
 	# The IDs are obtained by using the split function and the length of the array is the number of unread emails
@@ -232,50 +196,25 @@ def retrieve_emails(connection):
 	return emails_info
 
 # Main function called from outside 
-def main():
-
-	global config
+def main(config: dict) -> Optional[list[Any]]:
+	# create log
 	global log
-	
-	# Logging configuration
-	try:
-		with open('conf/logging_conf.json') as log_conf:
-			log_conf_dict = json.load(log_conf)
-			logging.config.dictConfig(log_conf_dict)
-	except Exception as e: 
-		print("[ERROR]_[list_emails]: Error while trying to open the file 'conf/logging_conf.json'. It cannot be read or it is not valid: {}".format(traceback.format_exc()))
-		return 
-	log = logging.getLogger(__name__)
-
-	# IMAP configuration
-	try:
-		with open('conf/configuration.json') as conf_file:
-			conf_dict = json.load(conf_file)
-			
-			# IMAP config
-			config['imapHost'] = conf_dict['imap']['host']
-			config['imapPort'] = int(conf_dict['imap']['port'])
-			config['imapInsecure'] = conf_dict['imap']['insecure']
-			config['imapUser'] = conf_dict['imap']['user']
-			config['imapPassword'] = conf_dict['imap']['password']
-			config['imapFolder'] = conf_dict['imap']['folder']
-
-	except Exception as e: 
-		log.error("Error while trying to open the file 'conf/configuration.json': {}".format(traceback.format_exc()))
-		return
+	log = utils.log.get_logger("list_emails")
 
 	# Connect to IMAP server
 	try:
-		connection = connect_to_IMAP_server()
+		connection = utils.imap.connect(config, log)
 	except Exception as e:
 		log.error("Error while trying to connect to IMAP server: {}".format(traceback.format_exc()))
-		return
+		return None
 
 	# Call the retrieve_emails function
 	try:
-		emails_info = retrieve_emails(connection)
+		emails_info = retrieve_emails(connection, config)
 	except Exception as e:
 		log.error("Error while trying to retrieve the emails: {}".format(traceback.format_exc()))
-		return
+		return None
+
+	# Return
 	return emails_info
 
