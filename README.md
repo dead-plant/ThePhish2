@@ -28,54 +28,52 @@ ThePhish is an automated phishing email analysis tool based on [TheHive](https:/
 * [License](https://github.com/dead-plant/ThePhish2/blob/master/LICENSE)
 
 ## Overview
-ThePhish2 is a fork of [ThePhish](https://github.com/emalderson/ThePhish/tree/master) made by github.com/emalderson.
-Take a look at his documentation to find out more about how ThePhish works, what it is and how to use it.
+ThePhish2 is a fork of [ThePhish](https://github.com/emalderson/ThePhish) by [@emalderson](https://github.com/emalderson).
+Take a look at the upstream documentation to find more detailed information on how ThePhish works, what it is, and how to use it.
 
-Some useful resources from the original Documentation:
+Some useful resources from the original documentation:
 * [README.md](https://github.com/emalderson/ThePhish/blob/master/README.md)
-    * [ThePhish example usage](https://github.com/emalderson/ThePhish/blob/master/README.md#thephish-example-usage)
-    * [Implementation](https://github.com/dead-plant/ThePhish2/blob/master/README.md#implementation)
-    * [Who talks about ThePhish](https://github.com/dead-plant/ThePhish2/blob/master/README.md#who-talks-about-thephish)
-    * [GitHub repositories mentioning ThePhish](https://github.com/dead-plant/ThePhish2/blob/master/README.md#github-repositories-mentioning-thephish)
-    * [Credits](https://github.com/dead-plant/ThePhish2/blob/master/README.md#credits)
+  * [ThePhish example usage](https://github.com/emalderson/ThePhish/blob/master/README.md#thephish-example-usage)
+  * [Implementation](https://github.com/emalderson/ThePhish/blob/master/README.md#implementation)
+  * [Who talks about ThePhish](https://github.com/emalderson/ThePhish/blob/master/README.md#who-talks-about-thephish)
+  * [GitHub repositories mentioning ThePhish](https://github.com/emalderson/ThePhish/blob/master/README.md#github-repositories-mentioning-thephish)
+  * [Credits](https://github.com/emalderson/ThePhish/blob/master/README.md#credits)
 * [Diagrams](https://github.com/emalderson/ThePhish/blob/master/diagrams.md)
 
-github.com/emalderson also has installation/configuration guides in his [README.md](https://github.com/emalderson/ThePhish/blob/master/README.md), which i will refer to in my [Installation guide](#installation)
+The upstream repository also provides installation and configuration guides, which I partially reference in my [Setup guide](#setup-guide).
 
 ## How to use
-Quick note: This is only a short overview of how this works. If you want a more detailed usage guide visit the [usage example](https://github.com/emalderson/ThePhish/blob/master/README.md#thephish-example-usage) of the original ThePhish repo.
+Quick note: this is only a short overview. For a detailed walkthrough, see the upstream [usage example](https://github.com/emalderson/ThePhish/blob/master/README.md#thephish-example-usage).
 
-1: First a user forwards an as a .eml attachment to a inbox created for ThePhish.
-
+1. Forward the suspicious message as a `.eml` attachment (not inline) to the mailbox monitored by ThePhish2.
 <img src="pictures/demo/0_do_forward.png" width="400">
-
-2: After the user has forwarded the email the analyst can open ThePhish in his browser. There he can click "List emails" to fetch all emails from the Mailserver using IMAP.
-
+2. In your browser, open ThePhish2 and click `List emails` to fetch messages from the mail server via IMAP.
 <img src="pictures/demo/2_gui_list.png" width="700">
-
-3:Then the analyst selects an email and clicks on "Analyze" to start the Analysis of an email.
-
+3. Select an email and click `Analyze` to create a TheHive case and run Cortex analyzers.
 <img src="pictures/demo/3_start_analysis_gui.png" width="700">
+4. Review the verdict in the UI. If configured correctly, export malicious cases to MISP.
 
 ## What changed
 ### Code
-* Partially refactored/reorganised to make it more maintainable
-* Python 3.12
-* Updated dependencies to newer versions
+* Partially refactored/reorganized for better maintainability
+* Make it work on Python 3.12
+* Updated dependencies to current versions
   * Fixed bugs
-  * Fixed many security vulnerabilities
+  * Addressed multiple security vulnerabilities
 
 ### Features
-* TheHive5 (Upgraded to thehive4py:2)
-  * Note: thehive4py:2 no longer supports TheHive4 or older. If you wish to use TH4 or earlier check out the original ThePhish project or switch to legacy page on this repo. (Has known bugs)
-* IMAP enhanced security
+* TheHive 5 support (Upgraded to thehive4py v2)
+  * Breaking: thehive4py v2 does not support TheHive 4 or earlier. If you still need TheHive 4 compatibility, use the upstream project or the legacy branch of this fork, though this might have issues.
+* IMAP
+  * STARTTLS support
   * Automatic switching between TLS and STARTTLS
   * Certificate verification
   * Option to disable certificate verification (not recommended)
-* Option to disable certificate verification for TheHive and Cortex API
+* Other
+  * Added the option to disable certificate verification for TheHive API and Cortex API
 
 ### Bug fixes
-* Very slow analysis under certain conditions (not known)
+* Very slow analysis under certain conditions (exact conditions unknown)
 
 ## Setup Guide
 ### Installation
