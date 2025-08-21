@@ -22,7 +22,7 @@ app = flask.Flask(__name__, template_folder='web/templates', static_folder='web/
 socketio = flask_socketio.SocketIO(app)
 
 # Create global variables log and config
-log:logging.Logger
+log: logging.Logger
 config: dict
 
 # The main page
