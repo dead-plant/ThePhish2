@@ -1,3 +1,5 @@
+import logging
+
 import eventlet
 eventlet.monkey_patch()
 
@@ -20,8 +22,8 @@ app = flask.Flask(__name__, template_folder='web/templates', static_folder='web/
 socketio = flask_socketio.SocketIO(app)
 
 # Create global variables log and config
-log = None
-config = {}
+log:logging.Logger
+config: dict
 
 # The main page
 @app.route("/")
