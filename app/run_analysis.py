@@ -29,8 +29,7 @@ def notify_start_of_analysis(case, task_id, mail_to, wsl: WebSocketLogger, api_t
 	# Obtain the representation of the Mailer responder
 	mailer_responder = api_cortex.responders.get_by_name('Mailer_1_0')
 	# Check if the responder has been enabled in Cortex
-	#if mailer_responder:
-	if False:
+	if mailer_responder:
 		# Obtain the ID of the Mailer responder and start the Mailer responder on the first task
 		job_mailer_id = api_thehive.run_responder(mailer_responder.id, 'case_task', task_id).json()['cortexJobId']
 		# Obtain the status of the job related to the Mailer responder and wait for its completion
@@ -419,8 +418,7 @@ def terminate_analysis(case, task_id, mail_to, observables_info, reports_observa
 		# Obtain the representation of the Mailer responder
 		mailer_responder = api_cortex.responders.get_by_name('Mailer_1_0')
 		# Check if the responder has been enabled in Cortex
-		#if (mailer_responder):
-		if False:
+		if (mailer_responder):
 			# Obtain the ID of the Mailer responder and start the Mailer responder on the third task
 			job_mailer_id = api_thehive.run_responder(mailer_responder.id, 'case_task', task_id).json()['cortexJobId']
 			# Obtain the status of the job related to the Mailer responder and wait for its completion
