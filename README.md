@@ -63,7 +63,7 @@ Quick note: this is only a short overview. For a detailed walkthrough, see the u
 
 ### Features
 * TheHive 5 support (Upgraded to thehive4py v2)
-  * Breaking: thehive4py v2 does not support TheHive 4 or earlier. If you still need TheHive 4 compatibility, use the upstream project or the legacy branch of this fork, though this might have issues.
+  * Breaking: thehive4py v2 does not support TheHive 4 or earlier. If you still need TheHive 4 compatibility use the upstream project.
 * IMAP
   * STARTTLS support
   * Automatic switching between TLS and STARTTLS
