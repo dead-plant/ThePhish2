@@ -1,9 +1,3 @@
-<!--
-Adapted from emalderson/ThePhish (AGPL-3.0), copied on 2025-08-22.
-Modifications: updated links, repo name, and contact email.
-This file is distributed under the GNU AGPL v3.0 (or later).
--->
-
 <!-- omit in toc -->
 # Contributing to ThePhish
 
