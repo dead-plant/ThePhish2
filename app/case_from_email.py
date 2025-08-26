@@ -3,6 +3,7 @@ import base64
 import hashlib
 import email
 import email.header, email.utils, email.parser, email.generator
+import json
 import logging
 from typing import Optional, Any
 import emoji
@@ -16,6 +17,19 @@ import utils.log
 import utils.whitelist
 import utils.imap
 from utils.ws_logger import WebSocketLogger
+
+import tempfile
+import os
+
+def _save_tuple_to_tempfile(file_tuple):
+	"""Accepts (BytesIO, filename) and writes to a NamedTemporaryFile, returns its path"""
+	bio, fname = file_tuple
+	bio.seek(0)
+	fd, path = tempfile.mkstemp(prefix="thephish_", suffix="_" + os.path.basename(fname))
+	with os.fdopen(fd, 'wb') as f:
+		f.write(bio.read())
+	return path
+
 
 # Global variable used for logging
 log: logging.Logger
@@ -273,7 +287,7 @@ def create_case(subject_field, observables_header, observables_body, attachments
 				config: dict, api_thehive: TheHiveApi, wsl: WebSocketLogger):
 	# Create the case template first if it does not exist
 	case_templates = api_thehive.case_template.find(
-		filters=[{"_name": "name", "_value": "ThePhish"}]
+		filters={"_eq": {"_field": "name", "_value": "ThePhish"}}
 	)
 
 	if len(case_templates) == 0:
@@ -299,38 +313,22 @@ def create_case(subject_field, observables_header, observables_body, attachments
 			wsl.emit_error('Cannot create template')
 			return
 
-	# Map TLP values (v2 uses strings instead of integers)
-	tlp_mapping = {
-		'0': 'WHITE',
-		'1': 'GREEN',
-		'2': 'AMBER',
-		'3': 'RED'
-	}
-
-	# Map PAP values (v2 uses strings instead of integers)
-	pap_mapping = {
-		'0': 'WHITE',
-		'1': 'GREEN',
-		'2': 'AMBER',
-		'3': 'RED'
-	}
-
 	# Create the case on TheHive
 	# The emojis are removed to prevent problems when exporting the case to MISP
 	case_data = {
-		"title": emoji.replace_emoji(subject_field),
-		"tlp": tlp_mapping.get(str(config['case']['tlp']), 'AMBER'),
-		"pap": pap_mapping.get(str(config['case']['pap']), 'AMBER'),
+		"title": str(emoji.replace_emoji(subject_field)),
+		"tlp": int(config['case']['tlp']),
+		"pap": int(config['case']['pap']),
 		"flag": False,
 		"tags": config['case']['tags'],
 		"description": "Case created automatically by ThePhish",
-		"template": "ThePhish"
+		"caseTemplate": "ThePhish",
 	}
 
 	new_case = api_thehive.case.create(case_data)
 	if new_case:
-		new_id = new_case.id
-		new_case_id = new_case.number
+		new_id = new_case["_id"]
+		new_case_id = new_case["number"]
 		log.info('Created case {}'.format(new_case_id))
 		wsl.emit_info('Created case {}'.format(new_case_id))
 
@@ -344,7 +342,7 @@ def create_case(subject_field, observables_header, observables_body, attachments
 					"tags": ['email', 'email_header', 'email_header_{}'.format(header_field)],
 					"message": 'Found in the {} field of the email header'.format(header_field)
 				}
-				created_obs = api_thehive.observable.create(case_id=new_id, observable=observable)
+				created_obs = api_thehive.case.create_observable(case_id=new_id, observable=observable)
 				if created_obs:
 					log.info('Added observable {0}: {1} to case {2}'.format(observable_header['type'],
 																			observable_header['value'], new_case_id))
@@ -364,7 +362,7 @@ def create_case(subject_field, observables_header, observables_body, attachments
 				"tags": ['email', 'email_body'],
 				"message": 'Found in the email body'
 			}
-			created_obs = api_thehive.observable.create(case_id=new_id, observable=observable)
+			created_obs = api_thehive.case.create_observable(case_id=new_id, observable=observable)
 			if created_obs:
 				log.info(
 					'Added observable {0}: {1} to case {2}'.format(observable_body['type'], observable_body['value'],
@@ -378,13 +376,11 @@ def create_case(subject_field, observables_header, observables_body, attachments
 		# Add attachments
 		for attachment in attachments:
 			# For file observables in v2, we need to use the create_file method
-			created_obs = api_thehive.observable.create_file(
+			tmp_path = _save_tuple_to_tempfile(attachment)
+			created_obs = api_thehive.case.create_observable(
 				case_id=new_id,
-				file_path=attachment,  # The tuple (BytesIO, filename)
-				data_type='file',
-				ioc=False,
-				tags=['email', 'email_attachment'],
-				message='Found as email attachment'
+				observable={'dataType': 'file', 'ioc': False, 'tags': ['email','email_attachment'], 'message': 'Found as email attachment'},
+				observable_path=tmp_path
 			)
 			if created_obs:
 				log.info('Added observable file {0} to case {1}'.format(attachment[1], new_case_id))
@@ -401,7 +397,7 @@ def create_case(subject_field, observables_header, observables_body, attachments
 				"tags": ['email', 'email_attachment_hash'],
 				"message": 'Hash of attachment "{}"'.format(hash_attachment['hashedAttachment'])
 			}
-			created_obs = api_thehive.observable.create(case_id=new_id, observable=observable)
+			created_obs = api_thehive.case.create_observable(case_id=new_id, observable=observable)
 			if created_obs:
 				log.info('Added observable hash: {0} to case {1}'.format(hash_attachment['hashValue'], new_case_id))
 				wsl.emit_info(
@@ -411,13 +407,11 @@ def create_case(subject_field, observables_header, observables_body, attachments
 
 		# Add eml file (using the tuple)
 		if eml_file_tuple:
-			created_obs = api_thehive.observable.create_file(
+			tmp_eml_path = _save_tuple_to_tempfile(eml_file_tuple)
+			created_obs = api_thehive.case.create_observable(
 				case_id=new_id,
-				file_path=eml_file_tuple,  # The tuple (BytesIO, filename)
-				data_type='file',
-				ioc=False,
-				tags=['email', 'email_sample'],
-				message='Attached email in eml format'
+				observable={'dataType': 'file', 'ioc': False, 'tags': ['email','email_sample'], 'message': 'Attached email in eml format'},
+				observable_path=tmp_eml_path
 			)
 			if created_obs:
 				log.info('Added observable file {0} to case {1}'.format(eml_file_tuple[1], new_case_id))
