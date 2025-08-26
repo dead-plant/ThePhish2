@@ -9,8 +9,8 @@ import emoji
 import urllib.parse
 import traceback
 import ioc_finder
-import thehive4py.api, thehive4py.models, thehive4py.query
-from thehive4py.api import TheHiveApi
+from thehive4py import TheHiveApi
+from thehive4py.types.case import OutputCase
 
 import utils.log
 import utils.whitelist
@@ -22,7 +22,7 @@ log: logging.Logger
 
 
 # Use the ioc-finder module to extract observables from a string buffer and add to the list only if they are not whitelisted
-def search_observables(buffer, whitelist:dict,  wsl: WebSocketLogger):
+def search_observables(buffer, whitelist: dict, wsl: WebSocketLogger):
 	observables = []
 	iocs = {}
 	iocs['email_addresses'] = ioc_finder.parse_email_addresses(buffer)
@@ -43,8 +43,8 @@ def search_observables(buffer, whitelist:dict,  wsl: WebSocketLogger):
 			log.info("Skipped whitelisted observable ip: {0}".format(ip))
 			wsl.emit_info("Skipped whitelisted observable ip: {0}".format(ip))
 		else:
-			log.info("Found observable ip: {0}".format(ip))	  
-			wsl.emit_info("Found observable ip: {0}".format(ip))			
+			log.info("Found observable ip: {0}".format(ip))
+			wsl.emit_info("Found observable ip: {0}".format(ip))
 			observables.append({'type': 'ip', 'value': ip})
 	for domain in iocs['domains']:
 		if utils.whitelist.is_whitelisted(whitelist, 'domain', domain):
@@ -67,7 +67,6 @@ def search_observables(buffer, whitelist:dict,  wsl: WebSocketLogger):
 
 # Use the mail UID of the selected email to fetch only that email from the mailbox
 def obtain_eml(connection, mail_uid, config: dict, wsl: WebSocketLogger):
-
 	# Read all the unseen emails from this folder
 	connection.select(config['imap']['folder'])
 	typ, dat = connection.search(None, '(UNSEEN)')
@@ -84,7 +83,7 @@ def obtain_eml(connection, mail_uid, config: dict, wsl: WebSocketLogger):
 		# The fetch operation flags the message as seen by default
 		log.info("Message {0} flagged as read".format(mail_uid))
 		wsl.emit_info("Message {0} flagged as read".format(mail_uid))
-		
+
 		# Obtain the From field of the external email that will be used to send the verdict to the user
 		msg = email.message_from_bytes(message)
 		decode = email.header.decode_header(msg['From'])[0]
@@ -101,7 +100,7 @@ def obtain_eml(connection, mail_uid, config: dict, wsl: WebSocketLogger):
 
 		# Variable that will contain the internal EML file
 		internal_msg = None
-		
+
 		# Walk the multipart structure of the email (now only the EML part is needed)
 		for part in msg.walk():
 			mimetype = part.get_content_type()
@@ -122,20 +121,20 @@ def obtain_eml(connection, mail_uid, config: dict, wsl: WebSocketLogger):
 
 				# If the EML attachment has been found, then break the for
 				break
-				
+
 		return internal_msg, external_from_field
 
 	else:
 		# Handle multiple analysts that select the same email from more than one tab
-		log.error("The email with UID {} has already been analyzed. Please refresh the page and retry.".format(mail_uid))
-		wsl.emit_error("The email with UID {} has already been analyzed. Please refresh the page and retry.".format(mail_uid))
+		log.error(
+			"The email with UID {} has already been analyzed. Please refresh the page and retry.".format(mail_uid))
+		wsl.emit_error(
+			"The email with UID {} has already been analyzed. Please refresh the page and retry.".format(mail_uid))
 		return None
-
 
 
 # Parse the EML file and extract the observables
 def parse_eml(internal_msg, whitelist: dict, wsl: WebSocketLogger):
-
 	# Obtain the subject of the internal email
 	# This is not straightforward since the subject might be splitted in two or more parts
 	decode_subj = email.header.decode_header(internal_msg['Subject'])
@@ -170,38 +169,39 @@ def parse_eml(internal_msg, whitelist: dict, wsl: WebSocketLogger):
 
 	# List of header fields to consider when searching for observables in the header
 	header_fields_list = [
-		'To', 
-		'From', 
+		'To',
+		'From',
 		'Sender',
 		'Cc',
 		'Delivered-To',
-		'Return-Path', 
+		'Return-Path',
 		'Reply-To',
 		'Bounces-to',
-		'Received', 
-		'X-Received', 
-		'X-OriginatorOrg', 
-		'X-Sender-IP', 
+		'Received',
+		'X-Received',
+		'X-OriginatorOrg',
+		'X-Sender-IP',
 		'X-Originating-IP',
 		'X-SenderIP',
 		'X-Originating-Email'
 	]
-	
-	# Extract header fields 
+
+	# Extract header fields
 	parser = email.parser.HeaderParser()
 	header_fields = parser.parsestr(internal_msg.as_string())
 
 	# Search the observables in the values of all the selected header fields
 	# Since a field may appear more than one time (e.g. Received:), the lists need to be initialized and then extended
 	i = 0
-	while  i < len(header_fields.keys()):
+	while i < len(header_fields.keys()):
 		if header_fields.keys()[i] in header_fields_list:
 			if not observables_header.get(header_fields.keys()[i]):
 				observables_header[header_fields.keys()[i]] = []
-			observables_header[header_fields.keys()[i]].extend(search_observables(header_fields.values()[i], whitelist, wsl))
-		i+=1
-	
-	# Walk the multipart structure of the internal email 
+			observables_header[header_fields.keys()[i]].extend(
+				search_observables(header_fields.values()[i], whitelist, wsl))
+		i += 1
+
+	# Walk the multipart structure of the internal email
 	for part in internal_msg.walk():
 		mimetype = part.get_content_type()
 		content_disposition = part.get_content_disposition()
@@ -226,7 +226,8 @@ def parse_eml(internal_msg, whitelist: dict, wsl: WebSocketLogger):
 			filename = part.get_filename()
 			if filename and mimetype:
 				# Add the attachment if it is not whitelisted (in terms of filename or filetype)
-				if utils.whitelist.is_whitelisted(whitelist, 'filename', filename) or utils.whitelist.is_whitelisted(whitelist, 'filetype', mimetype):
+				if utils.whitelist.is_whitelisted(whitelist, 'filename', filename) or utils.whitelist.is_whitelisted(
+						whitelist, 'filetype', mimetype):
 					log.info("Skipped whitelisted observable file: {0}".format(filename))
 					wsl.emit_info("Skipped whitelisted observable file: {0}".format(filename))
 				else:
@@ -245,8 +246,12 @@ def parse_eml(internal_msg, whitelist: dict, wsl: WebSocketLogger):
 						wsl.emit_info("Skipped whitelisted observable hash: {0}".format(hash_attachment['hashValue']))
 					else:
 						hashes_attachments.append(hash_attachment)
-						log.info("Found observable hash {0} calculated from file: {1}".format(hash_attachment['hashValue'], filename))
-						wsl.emit_info("Found observable hash {0} calculated from file: {1}".format(hash_attachment['hashValue'], filename))
+						log.info(
+							"Found observable hash {0} calculated from file: {1}".format(hash_attachment['hashValue'],
+																						 filename))
+						wsl.emit_info(
+							"Found observable hash {0} calculated from file: {1}".format(hash_attachment['hashValue'],
+																						 filename))
 
 	# Create a tuple containing the eml file and the name it should have as an observable
 	filename = subject_field + ".eml"
@@ -264,133 +269,173 @@ def parse_eml(internal_msg, whitelist: dict, wsl: WebSocketLogger):
 
 
 # Create the case on TheHive and add the observables to it
-def create_case(subject_field, observables_header, observables_body, attachments, hashes_attachments, eml_file_tuple, config: dict, api_thehive: TheHiveApi, wsl: WebSocketLogger):
-
+def create_case(subject_field, observables_header, observables_body, attachments, hashes_attachments, eml_file_tuple,
+				config: dict, api_thehive: TheHiveApi, wsl: WebSocketLogger):
 	# Create the case template first if it does not exist
-	if(len(api_thehive.find_case_templates(query = thehive4py.query.Eq("name", 'ThePhish')).json())) == 0:
-		task_notification = thehive4py.models.CaseTask(title = 'ThePhish notification')
-		task_analysis = thehive4py.models.CaseTask(title = 'ThePhish analysis')
-		task_result = thehive4py.models.CaseTask(title = 'ThePhish result')
-		case_template = thehive4py.models.CaseTemplate(name = 'ThePhish', titlePrefix = '[ThePhish] ', tasks = [task_notification, task_analysis, task_result])
+	case_templates = api_thehive.case_template.find(
+		filters=[{"_name": "name", "_value": "ThePhish"}]
+	)
 
-		response = api_thehive.create_case_template(case_template)
-		if response.status_code == 201:
+	if len(case_templates) == 0:
+		# Create tasks for the template
+		tasks = [
+			{"title": "ThePhish notification"},
+			{"title": "ThePhish analysis"},
+			{"title": "ThePhish result"}
+		]
+
+		case_template = {
+			"name": "ThePhish",
+			"titlePrefix": "[ThePhish] ",
+			"tasks": tasks
+		}
+
+		created_template = api_thehive.case_template.create(case_template)
+		if created_template:
 			log.info('Template ThePhish created successfully')
 			wsl.emit_info('Template ThePhish created successfully')
 		else:
-			log.error('Cannot create template: {0} ({1})'.format(response.status_code, response.text))
-			wsl.emit_error('Cannot create template: {0} ({1})'.format(response.status_code, response.text))
+			log.error('Cannot create template')
+			wsl.emit_error('Cannot create template')
 			return
 
-	
+	# Map TLP values (v2 uses strings instead of integers)
+	tlp_mapping = {
+		'0': 'WHITE',
+		'1': 'GREEN',
+		'2': 'AMBER',
+		'3': 'RED'
+	}
+
+	# Map PAP values (v2 uses strings instead of integers)
+	pap_mapping = {
+		'0': 'WHITE',
+		'1': 'GREEN',
+		'2': 'AMBER',
+		'3': 'RED'
+	}
+
 	# Create the case on TheHive
 	# The emojis are removed to prevent problems when exporting the case to MISP
-	case = thehive4py.models.Case(title		= emoji.replace_emoji(subject_field),
-				tlp		  = int(config['case']['tlp']),
-				pap		  = int(config['case']['pap']),
-				flag		 = False,
-				tags		 = config['case']['tags'],
-				description  = 'Case created automatically by ThePhish',
-				template	 = 'ThePhish')
-	response = api_thehive.create_case(case)
-	if response.status_code == 201:
-		new_case = response
-		new_id = new_case.json()['id']
-		new_case_id = new_case.json()['caseId']
+	case_data = {
+		"title": emoji.replace_emoji(subject_field),
+		"tlp": tlp_mapping.get(str(config['case']['tlp']), 'AMBER'),
+		"pap": pap_mapping.get(str(config['case']['pap']), 'AMBER'),
+		"flag": False,
+		"tags": config['case']['tags'],
+		"description": "Case created automatically by ThePhish",
+		"template": "ThePhish"
+	}
+
+	new_case = api_thehive.case.create(case_data)
+	if new_case:
+		new_id = new_case.id
+		new_case_id = new_case.number
 		log.info('Created case {}'.format(new_case_id))
 		wsl.emit_info('Created case {}'.format(new_case_id))
 
 		# Add observables found in the mail header
 		for header_field in observables_header:
 			for observable_header in observables_header[header_field]:
-				observable = thehive4py.models.CaseObservable(
-					dataType = observable_header['type'],
-					data	 = observable_header['value'],
-					ioc	  = False,
-					tags	 = ['email', 'email_header', 'email_header_{}'.format(header_field)],
-					message  = 'Found in the {} field of the email header'.format(header_field)
-					)
-				response = api_thehive.create_case_observable(new_id, observable)
-				if response.status_code == 201:
-					log.info('Added observable {0}: {1} to case {2}'.format(observable_header['type'], observable_header['value'], new_case_id))
-					wsl.emit_info('Added observable {0}: {1} to case {2}'.format(observable_header['type'], observable_header['value'], new_case_id))
+				observable = {
+					"dataType": observable_header['type'],
+					"data": observable_header['value'],
+					"ioc": False,
+					"tags": ['email', 'email_header', 'email_header_{}'.format(header_field)],
+					"message": 'Found in the {} field of the email header'.format(header_field)
+				}
+				created_obs = api_thehive.observable.create(case_id=new_id, observable=observable)
+				if created_obs:
+					log.info('Added observable {0}: {1} to case {2}'.format(observable_header['type'],
+																			observable_header['value'], new_case_id))
+					wsl.emit_info('Added observable {0}: {1} to case {2}'.format(observable_header['type'],
+																				 observable_header['value'],
+																				 new_case_id))
 				else:
-					log.debug('Cannot add observable {0}: {1} - {2} ({3})'.format(observable_header['type'], observable_header['value'], response.status_code, response.text))
+					log.debug(
+						'Cannot add observable {0}: {1}'.format(observable_header['type'], observable_header['value']))
 
 		# Add observables found in the mail body
 		for observable_body in observables_body:
-			observable = thehive4py.models.CaseObservable(
-				dataType = observable_body['type'],
-				data	 = observable_body['value'],
-				ioc	  = False,
-				tags	 = ['email', 'email_body'],
-				message  = 'Found in the email body'
-				)
-			response = api_thehive.create_case_observable(new_id, observable)
-			if response.status_code == 201:
-				log.info('Added observable {0}: {1} to case {2}'.format(observable_body['type'], observable_body['value'], new_case_id))
-				wsl.emit_info('Added observable {0}: {1} to case {2}'.format(observable_body['type'], observable_body['value'], new_case_id))
+			observable = {
+				"dataType": observable_body['type'],
+				"data": observable_body['value'],
+				"ioc": False,
+				"tags": ['email', 'email_body'],
+				"message": 'Found in the email body'
+			}
+			created_obs = api_thehive.observable.create(case_id=new_id, observable=observable)
+			if created_obs:
+				log.info(
+					'Added observable {0}: {1} to case {2}'.format(observable_body['type'], observable_body['value'],
+																   new_case_id))
+				wsl.emit_info(
+					'Added observable {0}: {1} to case {2}'.format(observable_body['type'], observable_body['value'],
+																   new_case_id))
 			else:
-				log.debug('Cannot add observable {0}: {1} - {2} ({3})'.format(observable_body['type'], observable_body['value'], response.status_code, response.text))
+				log.debug('Cannot add observable {0}: {1}'.format(observable_body['type'], observable_body['value']))
 
 		# Add attachments
 		for attachment in attachments:
-			observable = thehive4py.models.CaseObservable(
-				dataType='file',
-				data	= attachment,
-				ioc	 = False,
-				tags	= ['email', 'email_attachment'],
-				message = 'Found as email attachment'
-				)
-			response = api_thehive.create_case_observable(new_id, observable)
-			if response.status_code == 201:
+			# For file observables in v2, we need to use the create_file method
+			created_obs = api_thehive.observable.create_file(
+				case_id=new_id,
+				file_path=attachment,  # The tuple (BytesIO, filename)
+				data_type='file',
+				ioc=False,
+				tags=['email', 'email_attachment'],
+				message='Found as email attachment'
+			)
+			if created_obs:
 				log.info('Added observable file {0} to case {1}'.format(attachment[1], new_case_id))
 				wsl.emit_info('Added observable file {0} to case {1}'.format(attachment[1], new_case_id))
 			else:
-				log.debug('Cannot add observable: file {0} - {1} ({2})'.format(attachment[1], response.status_code, response.text))
+				log.debug('Cannot add observable: file {0}'.format(attachment[1]))
 
 		# Add hashes of the attachments
 		for hash_attachment in hashes_attachments:
-			observable = thehive4py.models.CaseObservable(
-				dataType = 'hash',
-				data	 = hash_attachment['hashValue'],
-				ioc	  = False,
-				tags	 = ['email', 'email_attachment_hash'],
-				message  = 'Hash of attachment "{}"'.format(hash_attachment['hashedAttachment'])
-				)
-			response = api_thehive.create_case_observable(new_id, observable)
-			if response.status_code == 201:
+			observable = {
+				"dataType": 'hash',
+				"data": hash_attachment['hashValue'],
+				"ioc": False,
+				"tags": ['email', 'email_attachment_hash'],
+				"message": 'Hash of attachment "{}"'.format(hash_attachment['hashedAttachment'])
+			}
+			created_obs = api_thehive.observable.create(case_id=new_id, observable=observable)
+			if created_obs:
 				log.info('Added observable hash: {0} to case {1}'.format(hash_attachment['hashValue'], new_case_id))
-				wsl.emit_info('Added observable hash: {0} to case {1}'.format(hash_attachment['hashValue'], new_case_id))
+				wsl.emit_info(
+					'Added observable hash: {0} to case {1}'.format(hash_attachment['hashValue'], new_case_id))
 			else:
-				log.debug('Cannot add observable hash: {0} - {1} ({2})'.format(hash_attachment['hashValue'], response.status_code, response.text))
+				log.debug('Cannot add observable hash: {0}'.format(hash_attachment['hashValue']))
 
 		# Add eml file (using the tuple)
 		if eml_file_tuple:
-			observable = thehive4py.models.CaseObservable(
-				dataType='file',
-				data	= eml_file_tuple,
-				ioc	 = False,
-				tags	= ['email', 'email_sample'],
-				message = 'Attached email in eml format'
-				)
-			response = api_thehive.create_case_observable(new_id, observable)
-			if response.status_code == 201:
+			created_obs = api_thehive.observable.create_file(
+				case_id=new_id,
+				file_path=eml_file_tuple,  # The tuple (BytesIO, filename)
+				data_type='file',
+				ioc=False,
+				tags=['email', 'email_sample'],
+				message='Attached email in eml format'
+			)
+			if created_obs:
 				log.info('Added observable file {0} to case {1}'.format(eml_file_tuple[1], new_case_id))
 				wsl.emit_info('Added observable file {0} to case {1}'.format(eml_file_tuple[1], new_case_id))
 			else:
-				log.debug('Cannot add observable: file {0} - {1} ({2})'.format(eml_file_tuple[1], response.status_code, response.text))
+				log.debug('Cannot add observable: file {0}'.format(eml_file_tuple[1]))
 
 	else:
-		log.error('Cannot create case: {0} ({1})'.format(response.status_code, response.text))
-		wsl.emit_error('Cannot create case: {0} ({1})'.format(response.status_code, response.text))
+		log.error('Cannot create case')
+		wsl.emit_error('Cannot create case')
 		return
-	
+
 	# Return the id of the just created case on which to run the analysis
 	return new_case
 
-# Main function called from outside 
-# The wsl is not a global variable to support multiple tabs 
+
+# Main function called from outside
+# The wsl is not a global variable to support multiple tabs
 def main(config: dict, wsl: WebSocketLogger, mail_uid) -> Optional[tuple[Any | None, Any]]:
 	# Create Logger
 	global log
@@ -421,7 +466,8 @@ def main(config: dict, wsl: WebSocketLogger, mail_uid) -> Optional[tuple[Any | N
 
 	# Call the parse_eml function
 	try:
-		subject_field, observables_header, observables_body, attachments, hashes_attachments, eml_file_tuple = parse_eml(internal_msg, whitelist, wsl)
+		subject_field, observables_header, observables_body, attachments, hashes_attachments, eml_file_tuple = parse_eml(
+			internal_msg, whitelist, wsl)
 	except Exception as e:
 		log.error("Error while trying to parse the internal eml file: {}".format(traceback.format_exc()))
 		wsl.emit_error("Error while trying to parse the internal eml file")
@@ -437,8 +483,12 @@ def main(config: dict, wsl: WebSocketLogger, mail_uid) -> Optional[tuple[Any | N
 		else:
 			raise Exception("insecure must be 'yes' or 'no'")
 
-		# Object needed to use TheHive4py
-		api_thehive = thehive4py.api.TheHiveApi(config['thehive']['url'], config['thehive']['apikey'], cert=verifycert)
+		# Object needed to use TheHive4py v2
+		api_thehive = TheHiveApi(
+			url=config['thehive']['url'],
+			apikey=config['thehive']['apikey'],
+			verify=verifycert
+		)
 
 	except Exception as e:
 		log.error("Error while trying to create thehive api: {}".format(traceback.format_exc()))
@@ -447,7 +497,8 @@ def main(config: dict, wsl: WebSocketLogger, mail_uid) -> Optional[tuple[Any | N
 
 	# Call the create_case function
 	try:
-		new_case = create_case(subject_field, observables_header, observables_body, attachments, hashes_attachments, eml_file_tuple, config, api_thehive, wsl)
+		new_case = create_case(subject_field, observables_header, observables_body, attachments, hashes_attachments,
+							   eml_file_tuple, config, api_thehive, wsl)
 	except Exception as e:
 		log.error("Error while trying to create the case: {}".format(traceback.format_exc()))
 		wsl.emit_error("Error while trying to create the case")
