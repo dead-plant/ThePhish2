@@ -215,7 +215,6 @@ def analyze_observables(case: OutputCase, task_id, wsl: WebSocketLogger, config:
 					)
 
 					# Retrieve the CortexJobId by using the random search id
-					time.sleep(1)
 					job['job_id'] = get_cortexjobid_by_thephish_search_id(api_cortex, thephish_search_id)
 
 					# Save the observable ID
