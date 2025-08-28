@@ -1,6 +1,9 @@
 import logging.config
 import json
+import re
 import time
+import random
+import string
 import traceback
 from thehive4py import TheHiveApi
 from thehive4py.types.case import OutputCase
@@ -12,6 +15,51 @@ from utils.ws_logger import WebSocketLogger
 # Global variable used for logging
 log: logging.Logger
 
+# Utility functions
+def get_cortexjobid_by_thephish_search_id(api_cortex: Api, search_id) -> str:
+	"""
+	Find JSON object with matching thephish_search_id in parameters.
+	Returns the matching object or None.
+	"""
+	time.sleep(3)
+	# fetch the latest 25 jobs from cortex api
+	json_string = bytes.decode(api_cortex.do_post(endpoint="job/_search?range=0-25&sort=-createdAt", data={}).content)
+
+	# Clean up the string
+	json_str = json_string.strip()
+	if json_str.startswith('"""') and json_str.endswith('"""'):
+		json_str = json_str[3:-3]
+
+	# Fix control characters
+	json_str = re.sub(r'[\n\r\t]', lambda m: {'\\n': '\\\\n', '\\r': '\\\\r', '\\t': '\\\\t'}.get(m.group(), m.group()),
+					  json_str)
+
+	# Try to parse
+	try:
+		data = json.loads(json_str)
+	except:
+		# Fallback: try with strict=False
+		data = json.loads(json_str, strict=False)
+
+	# Search for the ID
+	if not isinstance(data, list):
+		raise RuntimeError("Unable to parse JSON")
+
+	for obj in data:
+		if 'parameters' in obj and isinstance(obj['parameters'], dict):
+			if obj['parameters'].get('thephish_search_id') == search_id:
+				return obj.get('id')
+
+	raise RuntimeError("Unable to find Job id")
+
+def gen_thephish_search_id() -> str:
+	"""
+	Generate string: 'timestamp_10randomchars'
+	Example: '1756364024_aBcDeFgHiJ'
+	"""
+	timestamp = int(time.time())
+	random_chars = ''.join(random.choices(string.ascii_letters, k=10))
+	return f"{timestamp}_{random_chars}"
 
 # Send the notification to the user
 def notify_start_of_analysis(case: OutputCase, task_id, mail_to, wsl: WebSocketLogger, api_thehive: TheHiveApi,
@@ -21,7 +69,7 @@ def notify_start_of_analysis(case: OutputCase, task_id, mail_to, wsl: WebSocketL
 	# Uses [11:] to filter out the prefix [ThePhish] in the name of the case
 	task_update = {
 		"description": "mailto:" + mail_to + "\nThanks for the submission. Your e-mail with subject [{0}] is being analyzed.".format(
-			case.title[11:]),
+			case["title"][11:]),
 		"status": "InProgress"
 	}
 	api_thehive.task.update(task_id=task_id, fields=task_update)
@@ -31,12 +79,20 @@ def notify_start_of_analysis(case: OutputCase, task_id, mail_to, wsl: WebSocketL
 	# Check if the responder has been enabled in Cortex
 	if mailer_responder:
 		# Obtain the ID of the Mailer responder and start the Mailer responder on the first task
-		job_result = api_thehive.responder.run(
-			responder_id=mailer_responder.id,
-			object_type='case_task',
-			object_id=task_id
+		job_result = api_thehive.cortex.create_responder_action(
+			action={
+				"responderId": mailer_responder.id,
+				"objectType": "case_task",
+				"objectId": task_id,
+			}
 		)
-		job_mailer_id = job_result['cortexJobId']
+
+		# Get CortexJobId
+		time.sleep(3)
+		job_mailer_id = api_thehive.session.make_request(method="GET", path=f"/api/connector/cortex/action/Task/{job_result['objectId']}")[0]["cortexJobId"]
+		if job_mailer_id == "-":
+			raise RuntimeError("Cortex job id was not set by TheHive in time")
+
 		# Obtain the status of the job related to the Mailer responder and wait for its completion
 		job_mailer_status = api_cortex.jobs.get_by_id(job_mailer_id).json()['status']
 		while job_mailer_status not in ['Success', 'Failure']:
@@ -67,8 +123,21 @@ def analyze_observables(case: OutputCase, task_id, wsl: WebSocketLogger, config:
 	}
 	api_thehive.task.update(task_id=task_id, fields=task_update)
 
+	# Set case status to InProgress
+	case_update = {
+		"status": "InProgress"
+	}
+	try:
+		api_thehive.case.update(case_id=case["_id"], fields=case_update)
+		log.info("Case status set to 'InProgress'")
+		wsl.emit_info("Case status set to 'InProgress'")
+	except Exception as e:
+		log.info("Failed to set case status")
+		wsl.emit_info("Failed to set case status")
+		raise e
+
 	# Obtain the observable list from the case
-	observables_json = api_thehive.observable.get_all(case_id=case.id)
+	observables_json = api_thehive.case.find_observables(case_id=case["_id"])
 
 	# Create a list of jobs with:
 	# - job_id
@@ -78,6 +147,7 @@ def analyze_observables(case: OutputCase, task_id, wsl: WebSocketLogger, config:
 
 	# Create a list of delayed jobs with:
 	# - analyzer name
+	# - analyzer id
 	# - observable name on which to start the analyzer
 	# - observable type on which to start the analyzer
 	# - id of the observable on which to start the analyzer
@@ -106,22 +176,22 @@ def analyze_observables(case: OutputCase, task_id, wsl: WebSocketLogger, config:
 	for observable in observables_json:
 		observable_info = {}
 		# The needed information are in different places depending on the type of the observable
-		if observable.data_type == 'file':
-			observable_info['name'] = observable.attachment.name if hasattr(observable, 'attachment') else 'unknown'
-			if hasattr(observable, 'attachment') and hasattr(observable.attachment, 'content_type'):
-				if (observable.attachment.content_type == 'message/rfc822') or (
-						observable.attachment.content_type in ['application/x-empty', 'text/plain'] and observable_info[
+		if observable["dataType"] == 'file':
+			observable_info['name'] = observable.get('attachment', {}).get('name') if observable.get('attachment') else 'unknown'
+			if observable.get('attachment') and observable.get('attachment', {}).get('contentType') is not None:
+				if (observable.get("attachment", {}).get("contentType") == 'message/rfc822') or (
+						observable.get("attachment", {}).get("contentType") in ['application/x-empty', 'text/plain'] and observable_info[
 					'name'][-4:] == '.eml'):
-					observable_info['type'] = observable.data_type + '_' + 'message/rfc822'
+					observable_info['type'] = observable["dataType"] + '_' + 'message/rfc822'
 				else:
-					observable_info['type'] = observable.data_type
+					observable_info['type'] = observable["dataType"]
 			else:
-				observable_info['type'] = observable.data_type
+				observable_info['type'] = observable["dataType"]
 		else:
-			observable_info['name'] = observable.data
-			observable_info['type'] = observable.data_type
-		observable_info['tags'] = observable.tags if hasattr(observable, 'tags') else []
-		observable_info['id'] = observable.id
+			observable_info['name'] = observable["data"]
+			observable_info['type'] = observable["dataType"]
+		observable_info['tags'] = observable.get("tags", [])
+		observable_info['id'] = observable["_id"]
 		observables_info.append(observable_info)
 
 		# If it is the EML file, then create a new observable type and only execute yara
@@ -131,13 +201,23 @@ def analyze_observables(case: OutputCase, task_id, wsl: WebSocketLogger, config:
 				if analyzer.name == 'Yara_3_0':
 					# Create the job object
 					job = {}
+
+					# gen random string to mark cortex job (thephish_search_id)
+					thephish_search_id = gen_thephish_search_id()
+
 					# Run the analyzer and convert the response in JSON format, then obtain and save the job ID
-					job_result = api_thehive.cortex.run_analyzer(
-						cortex_id=config['cortex']['id'],
-						artifact_id=observable_info['id'],
-						analyzer_name=analyzer.name
+					job_result = api_thehive.cortex.create_analyzer_job(job={
+							"cortexId": config['cortex']['id'],
+							"artifactId": observable_info['id'],
+							"analyzerId": analyzer.id,
+							"parameters": {"thephish_search_id": thephish_search_id},
+						}
 					)
-					job['job_id'] = job_result['cortexJobId']
+
+					# Retrieve the CortexJobId by using the random search id
+					time.sleep(1)
+					job['job_id'] = get_cortexjobid_by_thephish_search_id(api_cortex, thephish_search_id)
+
 					# Save the observable ID
 					job['observable_id'] = observable_info['id']
 					# Set the status to NotTerminated
@@ -155,13 +235,20 @@ def analyze_observables(case: OutputCase, task_id, wsl: WebSocketLogger, config:
 		if observable_info['type'] == 'url':
 			for analyzer in applicable_analyzers[observable_info['type']]:
 				if analyzer.name == 'UnshortenLink_1_2':
+
+					# gen random string to mark cortex job (thephish_search_id)
+					thephish_search_id = gen_thephish_search_id()
+
 					# Start the UnshortenLink analyzer
-					job_result = api_thehive.cortex.run_analyzer(
-						cortex_id=config['cortex']['id'],
-						artifact_id=observable_info['id'],
-						analyzer_name='UnshortenLink_1_2'
+					job_result = api_thehive.cortex.create_analyzer_job(job={
+							"cortexId": config['cortex']['id'],
+							"artifactId": observable_info['id'],
+							"analyzerId": analyzer.id,
+							"parameters": {"thephish_search_id": thephish_search_id},
+						}
 					)
-					job_ul_id = job_result['cortexJobId']
+
+					job_ul_id = get_cortexjobid_by_thephish_search_id(api_cortex, thephish_search_id)
 					log.info(
 						"Started analyzer " + analyzer.name + " for " + observable_info['type'] + " " + observable_info[
 							'name'])
@@ -192,18 +279,18 @@ def analyze_observables(case: OutputCase, task_id, wsl: WebSocketLogger, config:
 								"tags": ['unshortened_url'],
 								"message": 'Unshortened from {}'.format(observable_info['name'])
 							}
-							created_obs = api_thehive.observable.create(case_id=case.id, observable=new_observable)
+							created_obs = api_thehive.case.create_observable(case_id=case["_id"], observable=new_observable)
 							log.info('Added unshortened url: {} as observable'.format(unshortened_url))
 							wsl.emit_info('Added unshortened url: {} as observable'.format(unshortened_url))
 							# Add the just created observable also to the list of observables on which the cycle is running, so that it will be analyzed as well
 							if created_obs:
-								new_obs = api_thehive.observable.get(observable_id=created_obs.id)
+								new_obs = api_thehive.observable.get(observable_id=created_obs["_id"])
 								observables_json.append(new_obs)
 								obs_unshortened_info = {}
-								obs_unshortened_info['name'] = new_obs.data
-								obs_unshortened_info['type'] = new_obs.data_type
-								obs_unshortened_info['tags'] = new_obs.tags if hasattr(new_obs, 'tags') else []
-								obs_unshortened_info['id'] = new_obs.id
+								obs_unshortened_info['name'] = new_obs["data"]
+								obs_unshortened_info['type'] = new_obs["dataType"]
+								obs_unshortened_info['tags'] = new_obs.get("tags", [])
+								obs_unshortened_info['id'] = new_obs["_id"]
 								observables_info.append(obs_unshortened_info)
 								log.info("Analyzer " + analyzer.name + " for " + observable_info['type'] + " " +
 										 observable_info[
@@ -229,12 +316,19 @@ def analyze_observables(case: OutputCase, task_id, wsl: WebSocketLogger, config:
 				# If it is an URL, do not start UnshortenLink again
 				if observable_info['type'] == 'url' and analyzer.name == 'UnshortenLink_1_2':
 					continue
+
+				# gen random string to mark cortex job (thephish_search_id)
+				thephish_search_id = gen_thephish_search_id()
+
 				# Start the analyzer
-				analyzer_job = api_thehive.cortex.run_analyzer(
-					cortex_id=config['cortex']['id'],
-					artifact_id=observable_info['id'],
-					analyzer_name=analyzer.name
+				analyzer_job = api_thehive.cortex.create_analyzer_job(job={
+						"cortexId": config['cortex']['id'],
+						"artifactId": observable_info['id'],
+						"analyzerId": analyzer.id,
+						"parameters": {"thephish_search_id": thephish_search_id},
+					}
 				)
+
 				# If the rate limit is exceeded for a certain analyzer, the related job is not started
 				# so the information needed to start the job later is added to a list of delayed jobs
 				if "RateLimitExceeded" in str(analyzer_job):
@@ -246,6 +340,7 @@ def analyze_observables(case: OutputCase, task_id, wsl: WebSocketLogger, config:
 						observable_info['name'] + ". It will be restarted in a while.")
 					delayed_job = {}
 					delayed_job['analyzer_name'] = analyzer.name
+					delayed_job['analyzer_id'] = analyzer.id
 					delayed_job['observable_name'] = observable_info['name']
 					delayed_job['observable_type'] = observable_info['type']
 					delayed_job['observable_id'] = observable_info['id']
@@ -253,7 +348,7 @@ def analyze_observables(case: OutputCase, task_id, wsl: WebSocketLogger, config:
 				# else add the information of the job to the list of started jobs
 				else:
 					job = {}
-					job['job_id'] = analyzer_job['cortexJobId']
+					job['job_id'] = get_cortexjobid_by_thephish_search_id(api_cortex, thephish_search_id)
 					job['observable_id'] = observable_info['id']
 					job['status'] = 'NotTerminated'
 					jobs.append(job)
@@ -267,12 +362,18 @@ def analyze_observables(case: OutputCase, task_id, wsl: WebSocketLogger, config:
 	# Try to start the delayed analyzers until the list of delayed analyzers becomes empty
 	while len(delayed_jobs) > 0:
 		for delayed_job in delayed_jobs:
+			# gen random string to mark cortex job (thephish_search_id)
+			thephish_search_id = gen_thephish_search_id()
+
 			# Try to start the analyzer
-			analyzer_job = api_thehive.cortex.run_analyzer(
-				cortex_id=config['cortex']['id'],
-				artifact_id=delayed_job['observable_id'],
-				analyzer_name=delayed_job['analyzer_name']
+			analyzer_job = api_thehive.cortex.create_analyzer_job(job={
+					"cortexId": config['cortex']['id'],
+					"artifactId": delayed_job['observable_id'],
+					"analyzerId": analyzer.id,
+					"parameters": {"thephish_search_id": thephish_search_id},
+				}
 			)
+
 			# If the rate limit is still exceeded for this analyzer, do not remove it from the list of delayed jobs
 			if "RateLimitExceeded" in str(analyzer_job):
 				log.info("Rate limit exceeded for analyzer " + delayed_job['analyzer_name'] + " for " + delayed_job[
@@ -284,7 +385,7 @@ def analyze_observables(case: OutputCase, task_id, wsl: WebSocketLogger, config:
 			# Otherwise start the analyzer, add it to the list of started analyzers and remove it from the list of delayed analyzers
 			else:
 				job = {}
-				job['job_id'] = analyzer_job['cortexJobId']
+				job['job_id'] = get_cortexjobid_by_thephish_search_id(api_cortex, thephish_search_id)
 				job['observable_id'] = delayed_job['observable_id']
 				job['status'] = 'NotTerminated'
 				jobs.append(job)
@@ -474,49 +575,53 @@ def terminate_analysis(case: OutputCase, task_id, mail_to, observables_info, rep
 
 		if verdict == 'Malicious':
 			# If the verdict is malicious, export also the case to MISP along with the observables marked as IoC
-			export_result = api_thehive.case.export_to_misp(
-				case_id=case.id,
-				misp_name=config['misp']['id']
-			)
-			if export_result:
+			try:
+				api_thehive.session.make_request(method="POST", path=f"/api/connector/misp/export/{case['_id']}/{config['misp']['id']}")
 				log.info("Case exported to MISP")
 				wsl.emit_info("Case exported to MISP")
-			else:
+			except:
 				log.warning("An error occurred during the export to MISP")
 				wsl.emit_warning("An error occurred during the export to MISP")
 			resolution_status = 'TruePositive'
-			impact_status = 'NoImpact'
 
 		elif verdict == 'Safe':
 			resolution_status = 'FalsePositive'
-			impact_status = 'NotApplicable'
 
 		# Add a description to the third task that is understood by the Mailer responder
 		# The description must start with "mailto:<email>" and then continue with the body of the email to send to the user
 		task_update = {
 			"description": "mailto:" + mail_to + "\nThanks for your submission. The e-mail with subject [{0}] you submitted has been classified as {1}".format(
-				case.title[11:], verdict)
+				case["title"][11:], verdict)
 		}
 		api_thehive.task.update(task_id=task_id, fields=task_update)
 		# Obtain the representation of the Mailer responder
 		mailer_responder = api_cortex.responders.get_by_name('Mailer_1_0')
 		# Check if the responder has been enabled in Cortex
-		if (mailer_responder):
-			# Obtain the ID of the Mailer responder and start the Mailer responder on the third task
-			job_result = api_thehive.responder.run(
-				responder_id=mailer_responder.id,
-				object_type='case_task',
-				object_id=task_id
+		if mailer_responder:
+			# Obtain the ID of the Mailer responder and start the Mailer responder on the first task
+			job_result = api_thehive.cortex.create_responder_action(
+				action={
+					"responderId": mailer_responder.id,
+					"objectType": "case_task",
+					"objectId": task_id,
+				}
 			)
-			job_mailer_id = job_result['cortexJobId']
+
+			# Get CortexJobId
+			time.sleep(3)
+			job_mailer_id = api_thehive.session.make_request(method="GET",
+															 path=f"/api/connector/cortex/action/Task/{job_result['objectId']}")[0]["cortexJobId"]
+			if job_mailer_id == "-":
+				raise RuntimeError("Cortex job id was not set by TheHive in time")
+
 			# Obtain the status of the job related to the Mailer responder and wait for its completion
 			job_mailer_status = api_cortex.jobs.get_by_id(job_mailer_id).json()['status']
 			while job_mailer_status not in ['Success', 'Failure']:
 				time.sleep(2)
 				job_mailer_status = api_cortex.jobs.get_by_id(job_mailer_id).json()['status']
 			if job_mailer_status == 'Success':
-				log.info('Response mail sent')
-				wsl.emit_info('Response mail sent')
+				log.info('Notification mail sent')
+				wsl.emit_info('Notification mail sent')
 			else:
 				log.warning('Something went wrong with the Mailer responder')
 				wsl.emit_warning('Something went wrong with the Mailer responder')
@@ -530,13 +635,7 @@ def terminate_analysis(case: OutputCase, task_id, mail_to, observables_info, rep
 		api_thehive.task.update(task_id=task_id, fields=task_update)
 
 		# Close the case
-		case_update = {
-			"status": "Resolved",
-			"resolutionStatus": resolution_status,
-			"impactStatus": impact_status,
-			"summary": "Automated analysis"
-		}
-		api_thehive.case.update(case_id=case.id, fields=case_update)
+		api_thehive.case.close(case_id=case["_id"], status=resolution_status, impact_status="NoImpact", summary="Automated analysis")
 		log.info("Case resolved as " + resolution_status)
 		wsl.emit_info("Case resolved as " + resolution_status)
 
@@ -615,15 +714,15 @@ def main(config: dict, wsl: WebSocketLogger, case: OutputCase, mail_to):
 		return None
 
 	# Obtain the IDS of the three task of the case
-	tasks = api_thehive.task.get_all(case_id=case.id)
+	tasks = api_thehive.case.find_tasks(case_id=case["_id"])
 	task_ids = {}
 	for task in tasks:
-		if task.title == "ThePhish notification":
-			task_ids['Notification'] = task.id
-		elif task.title == "ThePhish analysis":
-			task_ids['Analysis'] = task.id
-		elif task.title == "ThePhish result":
-			task_ids['Result'] = task.id
+		if task["title"] == "ThePhish notification":
+			task_ids['Notification'] = task["_id"]
+		elif task["title"] == "ThePhish analysis":
+			task_ids['Analysis'] = task["_id"]
+		elif task["title"] == "ThePhish result":
+			task_ids['Result'] = task["_id"]
 
 	# Call the notify_start_of_analysis function
 	try:
