@@ -35,15 +35,6 @@
 			"info" : "info"
 		}
 	},
-	"Onyphe_Summary_1_0" : {
-		"dataType" : ["url", "ip", "domain", "mail"],
-		"levelMapping" : {
-			"malicious" : "info",
-			"suspicious" : "info",
-			"safe" : "safe",
-			"info" : "info"
-		}
-	},
 	"PassiveTotal_Malware_2_0" : {
 		"dataType" : ["url", "ip", "domain", "mail"],
 		"levelMapping" : {
@@ -75,15 +66,6 @@
 		"dataType" : ["url", "ip", "domain", "mail"],
 		"levelMapping" : {
 			"malicious" : "info",
-			"suspicious" : "info",
-			"safe" : "safe",
-			"info" : "info"
-		}
-	},
-	"Threatcrowd_1_0" : {
-		"dataType" : ["url", "ip", "domain", "mail"],
-		"levelMapping" : {
-			"malicious" : "malicious",
 			"suspicious" : "info",
 			"safe" : "safe",
 			"info" : "info"
