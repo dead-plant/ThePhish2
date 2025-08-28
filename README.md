@@ -71,6 +71,7 @@ Quick note: this is only a short overview. For a detailed walkthrough, see the u
   * Option to disable certificate verification (not recommended)
 * Other
   * Added the option to disable certificate verification for TheHive API and Cortex API
+  * Update versions of code supported analyzers (and remove deprecated ones)
 
 ### Bug fixes
 * Very slow analysis under certain conditions (exact conditions unknown)
