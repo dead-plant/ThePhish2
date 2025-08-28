@@ -21,35 +21,35 @@ def get_cortexjobid_by_thephish_search_id(api_cortex: Api, search_id) -> str:
 	Find JSON object with matching thephish_search_id in parameters.
 	Returns the matching object or None.
 	"""
-	time.sleep(3)
-	# fetch the latest 25 jobs from cortex api
-	json_string = bytes.decode(api_cortex.do_post(endpoint="job/_search?range=0-25&sort=-createdAt", data={}).content)
+	for i in range(0, 60):
+		time.sleep(2)
+		# fetch the latest 25 jobs from cortex api
+		json_string = bytes.decode(api_cortex.do_post(endpoint="job/_search?range=0-25&sort=-createdAt", data={}).content)
 
-	# Clean up the string
-	json_str = json_string.strip()
-	if json_str.startswith('"""') and json_str.endswith('"""'):
-		json_str = json_str[3:-3]
+		# Clean up the string
+		json_str = json_string.strip()
+		if json_str.startswith('"""') and json_str.endswith('"""'):
+			json_str = json_str[3:-3]
 
-	# Fix control characters
-	json_str = re.sub(r'[\n\r\t]', lambda m: {'\\n': '\\\\n', '\\r': '\\\\r', '\\t': '\\\\t'}.get(m.group(), m.group()),
-					  json_str)
+		# Fix control characters
+		json_str = re.sub(r'[\n\r\t]', lambda m: {'\\n': '\\\\n', '\\r': '\\\\r', '\\t': '\\\\t'}.get(m.group(), m.group()),
+						  json_str)
 
-	# Try to parse
-	try:
-		data = json.loads(json_str)
-	except:
-		# Fallback: try with strict=False
-		data = json.loads(json_str, strict=False)
+		# Try to parse
+		try:
+			data = json.loads(json_str)
+		except:
+			# Fallback: try with strict=False
+			data = json.loads(json_str, strict=False)
 
-	# Search for the ID
-	if not isinstance(data, list):
-		raise RuntimeError("Unable to parse JSON")
+		# Search for the ID
+		if not isinstance(data, list):
+			raise RuntimeError("Unable to parse JSON")
 
-	for obj in data:
-		if 'parameters' in obj and isinstance(obj['parameters'], dict):
-			if obj['parameters'].get('thephish_search_id') == search_id:
-				return obj.get('id')
-
+		for obj in data:
+			if 'parameters' in obj and isinstance(obj['parameters'], dict):
+				if obj['parameters'].get('thephish_search_id') == search_id:
+					return obj.get('id')
 	raise RuntimeError("Unable to find Job id")
 
 def gen_thephish_search_id() -> str:
@@ -283,7 +283,7 @@ def analyze_observables(case: OutputCase, task_id, wsl: WebSocketLogger, config:
 							wsl.emit_info('Added unshortened url: {} as observable'.format(unshortened_url))
 							# Add the just created observable also to the list of observables on which the cycle is running, so that it will be analyzed as well
 							if created_obs:
-								new_obs = api_thehive.observable.get(observable_id=created_obs["_id"])
+								new_obs = api_thehive.observable.get(observable_id=created_obs[0].get('_id'))
 								observables_json.append(new_obs)
 								obs_unshortened_info = {}
 								obs_unshortened_info['name'] = new_obs["data"]
