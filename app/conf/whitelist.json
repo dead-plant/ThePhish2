@@ -5,12 +5,19 @@
 			"127.0.0.1"
 		],
 		"url" : [],
-		"domain" : [],
+		"domain" : [
+            "schemas.microsoft.com"
+        ],
 		"filename" : [],
 		"filetype" : [],
 		"hash" : []
 	},
-	"domainsInSubdomains" : [],
+	"domainsInSubdomains" : [
+      	"prod.outlook.com",
+		"outlook.office365.com",
+		"eu.iphmx.com",
+		"protection.outlook.com"
+    ],
 	"domainsInURLs" : [],
 	"domainsInEmails" : [],
 	"regexMatching" : {
